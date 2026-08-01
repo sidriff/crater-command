@@ -29,7 +29,7 @@ npm run typecheck
 ## Notes
 
 - Title boot defers Three/`PlanetScene` until after the typewriter (option A load path).
-- Advisor loops live under `public/advisor/` (may need to be re-added if binary push is limited).
-- Sandbox savepoint tag: `v0-crt-boot-factions`.
+- Advisor loops live under `public/advisor/`.
+- Local savepoint tag (when cloned from sandbox): `v0-crt-boot-factions`.
 
 Built in Grok Build / Orbital Slop lineage.
