@@ -38,10 +38,15 @@ function ensure(): AC | null {
     musicGain = ctx.createGain();
     musicGain.gain.value = 0;
     musicGain.connect(master);
-    master.gain.value = 0.55;
+    master.gain.value = 0.75;
     master.connect(ctx.destination);
   }
   return ctx;
+}
+
+/** Shared context for music + SFX. */
+export function getAudioContext(): AC | null {
+  return ensure();
 }
 
 /** Call synchronously from a user gesture. */
@@ -67,7 +72,7 @@ export function isMusicMuted() {
 export function setMusicMuted(m: boolean) {
   muted = m;
   if (!musicGain || !ctx) return;
-  const target = m || !playing ? 0.0001 : 0.22;
+  const target = m || !playing ? 0.0001 : 0.42;
   musicGain.gain.setTargetAtTime(target, ctx.currentTime, 0.05);
 }
 
@@ -197,14 +202,20 @@ export function startMusic() {
   const c = ensure();
   if (!c || !musicGain) return;
   unlockAudio();
-  if (playing) return;
+  if (master) master.gain.value = 0.75;
+  if (playing) {
+    if (!muted) {
+      musicGain.gain.setTargetAtTime(0.42, c.currentTime, 0.05);
+    }
+    return;
+  }
   playing = true;
   barCount = 0;
   nextBarTime = c.currentTime + 0.08;
   if (!muted) {
     musicGain.gain.cancelScheduledValues(c.currentTime);
     musicGain.gain.setValueAtTime(0.0001, c.currentTime);
-    musicGain.gain.exponentialRampToValueAtTime(0.22, c.currentTime + 1.2);
+    musicGain.gain.exponentialRampToValueAtTime(0.42, c.currentTime + 1.2);
   }
   tick();
 }
@@ -222,6 +233,5 @@ export function stopMusic() {
 
 export function ensureMusicFromGesture() {
   unlockAudio();
-  if (!startedOnce) return;
   if (!playing) startMusic();
 }

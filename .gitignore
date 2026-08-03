@@ -1,12 +1,44 @@
+# Dependencies
 node_modules/
-.output/
+
+# Build
+dist/
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor / local
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Package manager noise
+bun.lock
+bun.lockb
+.npm/
+
+# Sandbox / export residue (do not re-add)
+.tanstack/
 .vercel/
 .nitro/
-.tanstack/
-dist/
-.DS_Store
-*.log
-/tmp/
-screenshots/
+.output/
+.grok/
+.project_id
+.github_repo
+.node_modules.lock
+.push_*.json
+push_*.json
+*.tar.gz
 artifacts/
-.grok/status/
+attachments/
+screenshots/
+startup.sh
+AGENTS.md

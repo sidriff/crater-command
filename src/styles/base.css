@@ -1,0 +1,131 @@
+/* styles/base.css — extracted from styles.css */
+/* Crater Command — pure CSS
+ * Phosphor tokens from asterops PhosphorPanel: #00ffaa + Space Mono / VT323 / Turret Road
+ */
+
+:root {
+  --bg: #000814;
+  --surface: #04140e;
+  --surface-2: #0a2218;
+  --fg: #c8ffe8;
+  --muted: #5a9a7a;
+  --primary: #00ffaa;
+  --primary-dim: #00cc88;
+  --danger: #ff5533;
+  --warn: #ffcc66;
+  --border: #0d3a28;
+  --operators: #2dff8c;
+  --blight: #ff2a2a;
+  --mandate: #3d9bff;
+  --font-sans: "Turret Road", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Turret Road", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-crt: "VT323", "Space Mono", ui-monospace, monospace;
+  --phos: #00ffaa;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #000;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* —— Phone letterbox —— */
+.phone-shell-outer {
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.phone-shell-stage {
+  position: relative;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+.phone-notch {
+  display: none;
+}
+
+.phone-inner {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .phone-shell-stage {
+    aspect-ratio: 9 / 19.5;
+    height: auto;
+    max-height: min(100dvh - 1.5rem, 920px);
+    width: min(100vw - 2rem, calc((100dvh - 1.5rem) * 9 / 19.5), 430px);
+    border-radius: 1.75rem;
+    border: 1px solid var(--border);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.4),
+      0 25px 80px -20px rgba(0, 0, 0, 0.75);
+  }
+
+  .phone-notch {
+    display: flex;
+    pointer-events: none;
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    z-index: 50;
+    height: 1.5rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .phone-notch span {
+    margin-top: 0.5rem;
+    height: 0.25rem;
+    width: 4rem;
+    border-radius: 999px;
+    background: rgba(200, 255, 232, 0.15);
+  }
+
+  .phone-inner {
+    padding-top: 0.25rem;
+  }
+}
+

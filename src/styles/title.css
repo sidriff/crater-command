@@ -1,0 +1,286 @@
+/* styles/title.css — extracted from styles.css */
+/* —— CRT title —— */
+.crt-stage {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--phos);
+  font-family: var(--font-mono);
+}
+
+.crt-stage.crt-leaving {
+  animation: crt-leave-dim 0.45s steps(1, end) forwards;
+}
+
+@keyframes crt-leave-dim {
+  0% {
+    filter: brightness(1);
+  }
+  25% {
+    filter: brightness(1.35);
+  }
+  45% {
+    filter: brightness(0.35);
+  }
+  70% {
+    filter: brightness(0.7);
+  }
+  100% {
+    filter: brightness(0);
+  }
+}
+
+.crt-stars {
+  position: absolute;
+  inset: 0;
+  background: #000814;
+}
+
+.crt-star {
+  position: absolute;
+  border-radius: 999px;
+  background: #c8ffe8;
+}
+
+.crt-globe {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.crt-scanlines {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.18) 2px,
+    rgba(0, 0, 0, 0.18) 3px
+  );
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+}
+
+.crt-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 75% 65% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.55) 100%),
+    linear-gradient(180deg, rgba(0, 255, 170, 0.04), transparent 20%, transparent 80%, rgba(0, 0, 0, 0.35));
+}
+
+.crt-ui {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  font-family: var(--font-mono);
+}
+
+.crt-hud-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: max(0.6rem, env(safe-area-inset-top)) 0.75rem 0;
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+  color: rgba(0, 255, 170, 0.9);
+  min-height: 2.6rem; /* reserve so layout doesn't jump when jargon winks in */
+}
+
+.crt-hud-top .dim {
+  color: rgba(0, 255, 170, 0.7);
+}
+
+.crt-hud-top .warn {
+  color: #ff5533;
+}
+
+.crt-hud-top .right {
+  text-align: right;
+}
+
+.crt-title-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.crt-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem;
+  text-align: center;
+}
+
+.crt-kicker {
+  margin: 0 0 0.55rem;
+  font-family: var(--font-crt);
+  font-size: 14px;
+  letter-spacing: 0.28em;
+  color: rgba(0, 255, 170, 0.65);
+  min-height: 1.2em;
+}
+
+.crt-title {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.06em;
+  font-family: var(--font-mono);
+  font-size: clamp(1.85rem, 9vw, 2.55rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: 0.14em;
+  color: var(--phos);
+  text-shadow: 0 0 12px rgba(0, 255, 170, 0.45), 0 0 32px rgba(0, 255, 170, 0.15);
+}
+
+.crt-title-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 0.14em;
+  margin-right: -0.14em;
+  min-height: 1.05em;
+  white-space: nowrap;
+}
+
+/* Pre-size typewriter slots so center alignment never shifts while streaming.
+   Ghost (::before) = exact final glyph width. Cursor is out-of-flow so it never
+   steals horizontal space (that was shifting CRATER / COMMAND). */
+.crt-type-slot {
+  display: inline-grid;
+  justify-items: start;
+  text-align: left;
+  vertical-align: bottom;
+}
+
+.crt-type-slot::before {
+  content: attr(data-full);
+  grid-area: 1 / 1;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+}
+
+.crt-type-live {
+  grid-area: 1 / 1;
+  position: relative;
+  display: inline-block;
+  white-space: pre;
+  min-width: 0;
+}
+
+.crt-type-fill {
+  white-space: pre;
+  min-width: 0;
+}
+
+.crt-title .crt-type-slot {
+  justify-items: start;
+}
+
+.crt-cursor {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  display: block;
+  width: 0.52em;
+  height: 0.86em;
+  margin-left: 0.08em;
+  background: var(--phos);
+  box-shadow: 0 0 8px #00ffaa;
+  animation: pulse 1s step-end infinite;
+  pointer-events: none;
+}
+
+.crt-cursor.hidden {
+  display: none !important;
+}
+
+.crt-loadline {
+  margin-top: 0.85rem;
+  min-height: 1.35rem;
+  max-width: 22rem;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  color: rgba(0, 255, 170, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crt-loadline .crt-type-slot {
+  max-width: 100%;
+}
+
+.crt-loadline .crt-cursor,
+.pick-head .crt-cursor {
+  width: 0.48em;
+  height: 0.88em;
+  margin-left: 0.12em;
+  vertical-align: -0.1em;
+}
+
+.boot-progress {
+  margin: 1rem auto 0;
+  height: 4px;
+  width: 10rem;
+  overflow: hidden;
+  border-radius: 1px;
+  border: 1px solid rgba(0, 255, 170, 0.35);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.boot-progress-fill {
+  height: 100%;
+  width: 4%;
+  background: rgba(0, 255, 170, 0.85);
+  box-shadow: 0 0 8px #00ffaa;
+  /* Keep in sync with BAR_MS in title.ts */
+  animation: boot-progress 1.35s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes boot-progress {
+  from {
+    width: 4%;
+  }
+  to {
+    width: 96%;
+  }
+}
+
+.crt-actions {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 0 1rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 11.5rem; /* hold space while buttons are phos-off */
+}
+

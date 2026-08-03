@@ -31,8 +31,8 @@ export const CRATERS: CraterDef[] = [
     floorR: 5.2,
     rimW: 1.85,
     passes: [
-      { angle: Math.atan2(0.55, 0.75), halfWidth: 1.15 }, // toward mid / enemy
-      { angle: Math.atan2(-0.3, 0.9), halfWidth: 0.95 }, // side eco exit
+      { angle: Math.atan2(0.55, 0.75), halfWidth: 1.45 }, // toward mid / enemy
+      { angle: Math.atan2(-0.3, 0.9), halfWidth: 1.2 }, // side eco exit
     ],
   },
   {
@@ -41,8 +41,8 @@ export const CRATERS: CraterDef[] = [
     floorR: 5.2,
     rimW: 1.85,
     passes: [
-      { angle: Math.atan2(-0.55, -0.75), halfWidth: 1.15 },
-      { angle: Math.atan2(0.3, -0.9), halfWidth: 0.95 },
+      { angle: Math.atan2(-0.55, -0.75), halfWidth: 1.45 },
+      { angle: Math.atan2(0.3, -0.9), halfWidth: 1.2 },
     ],
   },
   // Mid control crater — contested bowl
@@ -52,10 +52,10 @@ export const CRATERS: CraterDef[] = [
     floorR: 4.0,
     rimW: 1.55,
     passes: [
-      { angle: 0, halfWidth: 1.05 },
-      { angle: Math.PI * 0.5, halfWidth: 1.05 },
-      { angle: Math.PI, halfWidth: 1.05 },
-      { angle: -Math.PI * 0.5, halfWidth: 1.05 },
+      { angle: 0, halfWidth: 1.35 },
+      { angle: Math.PI * 0.5, halfWidth: 1.35 },
+      { angle: Math.PI, halfWidth: 1.35 },
+      { angle: -Math.PI * 0.5, halfWidth: 1.35 },
     ],
   },
   // Side pocket
@@ -65,8 +65,8 @@ export const CRATERS: CraterDef[] = [
     floorR: 3.2,
     rimW: 1.3,
     passes: [
-      { angle: Math.atan2(-0.6, 0.5), halfWidth: 1.0 },
-      { angle: Math.atan2(0.7, -0.2), halfWidth: 0.9 },
+      { angle: Math.atan2(-0.6, 0.5), halfWidth: 1.25 },
+      { angle: Math.atan2(0.7, -0.2), halfWidth: 1.15 },
     ],
   },
   {
@@ -75,8 +75,8 @@ export const CRATERS: CraterDef[] = [
     floorR: 3.2,
     rimW: 1.3,
     passes: [
-      { angle: Math.atan2(0.6, -0.5), halfWidth: 1.0 },
-      { angle: Math.atan2(-0.7, 0.2), halfWidth: 0.9 },
+      { angle: Math.atan2(0.6, -0.5), halfWidth: 1.25 },
+      { angle: Math.atan2(-0.7, 0.2), halfWidth: 1.15 },
     ],
   },
 ];
@@ -298,7 +298,7 @@ export function strategicBiasMap(mx: number, my: number): number {
   return rim * 1.2 - floor * 0.85;
 }
 
-/** World-dir → map UV matching PlanetScene dirFromMap */
+/** World-dir → map UV matching planetMath dirFromMap */
 export function dirToMap(nx: number, ny: number, nz: number): { x: number; y: number } {
   let lon = Math.atan2(nx, nz);
   if (lon < 0) lon += Math.PI * 2;

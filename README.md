@@ -1,6 +1,8 @@
 # Crater Command
 
-High Slop pocket RTS on a hostile globe. Place buildings — armies run themselves. Three-minute matches, blind faction pick, CRT/VHS operator chrome.
+Pocket RTS on a hostile globe. Place buildings — armies run themselves. Three-minute matches, blind faction pick, CRT operator chrome.
+
+**Stack:** TypeScript · Vite · Three.js · raw HTML/CSS (no React, no R3F)
 
 ## Factions
 
@@ -10,26 +12,27 @@ High Slop pocket RTS on a hostile globe. Place buildings — armies run themselv
 | **System Blight** | Rogue mining gear gone feral. Expand, feed, hatch. |
 | **Surface Mandate** | Settled-world bureaucracy. Slow steel, deep pockets. |
 
-## Stack
+## Play
 
-React 19 · TypeScript · Vite · TanStack Start · Three.js / R3F · Tailwind v4
-
-## Dev
+1. Boot title → Engage (vs bot)
+2. Blind-pick a faction (or random)
+3. Drag the globe, zoom, place mines / bays / turrets
+4. Hold the core for 3:00 — or crack theirs
 
 ```bash
+# Bun (preferred)
+bun install
+bun dev
+
+# or npm
 npm install
-npm run dev   # 0.0.0.0:8080
+npm run dev
 ```
 
-```bash
-npm run build
-npm run typecheck
-```
-
-## Notes
-
-- Title boot defers Three/`PlanetScene` until after the typewriter (option A load path).
-- Advisor loops live under `public/advisor/`.
-- Local savepoint tag (when cloned from sandbox): `v0-crt-boot-factions`.
-
-Built in Grok Build / Orbital Slop lineage.
+| | Bun | npm |
+|---|-----|-----|
+| Install | `bun install` | `npm install` |
+| Dev (http://localhost:8080) | `bun dev` | `npm run dev` |
+| Build | `bun run build` | `npm run build` |
+| Preview | `bun run preview` | `npm run preview` |
+| Typecheck | `bun run typecheck` | `npm run typecheck` |

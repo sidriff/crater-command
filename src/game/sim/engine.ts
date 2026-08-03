@@ -1,21 +1,23 @@
 import {
   BASE_INCOME,
   BUILDINGS,
+  BUILD_MIN_DIST,
+  CORE_CAP,
   CORE_WORKER_CAP,
+  DOME_CAP,
+  EXTRACTOR_CAP_BONUS,
   EXTRACTOR_LINK_RANGE,
-  EXTRACTOR_WORKER_BONUS,
   MAP_H,
   MAP_W,
   MATCH_SECONDS,
-  MINE_CHANNEL,
   MINE_TRIP_YIELD,
-  PLACEABLE,
+  REFINERY_CAP,
   START_ENERGY,
   START_WORKERS,
   TICK_DT,
   UNITS,
   raceCostMul,
-  raceUnitMul,
+  unitCapCost,
 } from "./defs";
 import {
   START_P0,
@@ -23,9 +25,41 @@ import {
   canGroundOccupy,
   canPlaceBuilding,
   moveSpeedMul,
-  stepGround,
 } from "./terrain";
+import {
+  cellInReach,
+  computeReachable,
+  findPath,
+  hasPath,
+  moveAlongPath,
+  nearestWalkable,
+  type GroundPath,
+} from "./path";
+import { fireProjectile, tickCombat, tickProjectiles } from "./combat";
+import {
+  CAPACITOR_ENERGY_BONUS,
+  CARDS,
+  ENERGY_MAX_BASE,
+  HAND_SIZE,
+  cardOf,
+  shuffleInPlace,
+  starterDeck,
+  type CardId,
+} from "./deck";
+import { tickMovement, tickSeparation } from "./movement";
+import { tickProduction } from "./production";
+import { makeOp, tickOperations } from "./ops";
+import { stampAllVisits, tickWorkers } from "./workers";
+import {
+  allocId,
+  cellKey,
+  clamp,
+  dist,
+  getNextId,
+  setNextId,
+} from "./util";
 import type {
+  ActiveOp,
   Building,
   BuildingKind,
   GamePhase,
@@ -39,51 +73,8 @@ import type {
   SimSnapshot,
   Unit,
   UnitKind,
+  FloatEvent,
 } from "./types";
-
-let nextId = 1;
-function id() {
-  return nextId++;
-}
-
-function clamp(v: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, v));
-}
-
-function dist(ax: number, ay: number, bx: number, by: number) {
-  let dx = Math.abs(ax - bx);
-  if (dx > MAP_W / 2) dx = MAP_W - dx;
-  const dy = ay - by;
-  return Math.hypot(dx, dy);
-}
-
-function cellKey(x: number, y: number) {
-  return `${Math.round(x * 2) / 2},${Math.round(y * 2) / 2}`;
-}
-
-function unitShotStyle(kind: UnitKind): ProjectileStyle {
-  if (kind === "tank") return "shell";
-  if (kind === "flyer" || kind === "scout") return "laser";
-  return "bolt";
-}
-
-function buildingShotStyle(kind: BuildingKind): ProjectileStyle {
-  if (kind === "aa") return "laser";
-  return "bolt";
-}
-
-function sepRadius(kind: UnitKind): number {
-  if (kind === "tank") return 0.95;
-  if (kind === "flyer") return 0.85;
-  if (kind === "raider") return 0.7;
-  if (kind === "scout") return 0.65;
-  return 0.55; // worker
-}
-
-/** Stable slot angle for unit around a focus point */
-function slotAngle(id: number, slots = 8): number {
-  return ((id * 2.399) % slots) * ((Math.PI * 2) / slots);
-}
 
 export class GameSim {
   t = 0;
@@ -93,71 +84,237 @@ export class GameSim {
   units: Unit[] = [];
   minerals: Mineral[] = [];
   projectiles: Projectile[] = [];
+  floaters: FloatEvent[] = [];
+  ops: ActiveOp[] = [];
   players: PlayerState[] = [];
   messages: string[] = [];
-  private occupied = new Set<string>();
+  occupied = new Set<string>();
   private msgCd = 0;
+  paths = new Map<number, GroundPath>();
+  private reach0 = new Set<number>();
+  private reach1 = new Set<number>();
+  private reachUnion = new Set<number>();
 
   constructor(race0: RaceId, race1: RaceId) {
-    nextId = 1;
+    setNextId(1);
     this.players = [this.makePlayer(0, race0), this.makePlayer(1, race1)];
+    this.reach0 = computeReachable(START_P0.x, START_P0.y);
+    this.reach1 = computeReachable(START_P1.x, START_P1.y);
+    this.reachUnion = new Set([...this.reach0, ...this.reach1]);
     this.seedMinerals();
     this.spawnCore(0, START_P0.x, START_P0.y);
     this.spawnCore(1, START_P1.x, START_P1.y);
     for (const p of [0, 1] as PlayerId[]) {
       const core = this.buildings.find((b) => b.owner === p && b.kind === "core")!;
       for (let i = 0; i < START_WORKERS; i++) {
-        this.spawnUnit(
-          p,
-          "worker",
-          core.x + (i - 0.5) * 0.9,
-          core.y + (p === 0 ? 1.1 : -1.1),
-        );
+        const a = (i / START_WORKERS) * Math.PI * 2 + (p === 0 ? 0.4 : Math.PI + 0.4);
+        const r = 0.55;
+        this.spawnUnit(p, "worker", core.x + Math.cos(a) * r, core.y + Math.sin(a) * r);
       }
     }
-    this.refreshWorkerCaps();
+    this.refreshCapacity();
     this.recomputeVision();
   }
 
   private makePlayer(pid: PlayerId, race: RaceId): PlayerState {
+    const pool = starterDeck(race);
+    shuffleInPlace(pool);
+    const hand: string[] = [];
+    while (hand.length < HAND_SIZE && pool.length) hand.push(pool.pop()!);
+    const next = pool.length ? pool.pop()! : null;
     return {
       id: pid,
       race,
       energy: START_ENERGY,
+      energyMax: ENERGY_MAX_BASE,
       income: BASE_INCOME,
       alive: true,
       workerCap: CORE_WORKER_CAP,
+      capMax: CORE_CAP,
       vision: new Uint8Array(MAP_W * MAP_H),
+      hand,
+      next,
+      draw: pool,
+      discard: [],
+      techsPlaced: [],
+      visitT: new Float32Array(MAP_W * MAP_H).fill(-1e9),
     };
   }
 
-  private seedMinerals() {
-    // Crystals in start bowls + pass-adjacent + mid crater
-    const spots: { x: number; y: number; yield: number }[] = [
-      // P0 bowl
-      { x: START_P0.x - 1.6, y: START_P0.y - 1.2, yield: 9 },
-      { x: START_P0.x + 1.8, y: START_P0.y + 0.6, yield: 8 },
-      { x: START_P0.x - 0.4, y: START_P0.y + 2.0, yield: 7 },
-      // P1 bowl
-      { x: START_P1.x + 1.6, y: START_P1.y + 1.2, yield: 9 },
-      { x: START_P1.x - 1.8, y: START_P1.y - 0.6, yield: 8 },
-      { x: START_P1.x + 0.4, y: START_P1.y - 2.0, yield: 7 },
-      // mid crater
-      { x: MAP_W * 0.5 - 1.2, y: MAP_H * 0.5 + 0.8, yield: 7 },
-      { x: MAP_W * 0.5 + 1.2, y: MAP_H * 0.5 - 0.8, yield: 7 },
-      // side pockets
-      { x: MAP_W * 0.38, y: MAP_H * 0.62, yield: 6 },
-      { x: MAP_W * 0.62, y: MAP_H * 0.38, yield: 6 },
-    ];
-    for (const s of spots) {
-      this.minerals.push({ id: id(), x: s.x, y: s.y, yield: s.yield });
+  /** Shuffle discard → draw. Never touches hand or next. */
+  private reshuffleDiscardIntoDraw(p: PlayerState) {
+    if (!p.discard.length) return;
+    p.draw.push(...p.discard);
+    p.discard = [];
+    shuffleInPlace(p.draw);
+  }
+
+  private ensureNext(p: PlayerState) {
+    if (p.next != null) return;
+    if (!p.draw.length) this.reshuffleDiscardIntoDraw(p);
+    if (!p.draw.length) {
+      p.next = null;
+      return;
     }
+    p.next = p.draw.pop()!;
+  }
+
+  private cycleIntoHand(p: PlayerState) {
+    if (p.hand.length >= HAND_SIZE) return;
+    this.ensureNext(p);
+    if (p.next == null) return;
+    p.hand.push(p.next);
+    p.next = null;
+    this.ensureNext(p);
+  }
+
+  private resolveOpCard(player: PlayerId, cardId: string) {
+    const p = this.players[player]!;
+    const idx = p.hand.indexOf(cardId);
+    if (idx < 0) return;
+    p.hand.splice(idx, 1);
+    p.discard.push(cardId);
+    this.cycleIntoHand(p);
+  }
+
+  private seedMinerals() {
+    /**
+     * Mineral FIELDS: ~3× surface density.
+     * Each crystal 20–100 stock; only on path-reachable cells.
+     */
+    const minCrystalSep = 0.42;
+    const minFieldSep = 1.7;
+    const fieldCenters: { x: number; y: number }[] = [];
+    const HOME_STOCK_TARGET = 6000;
+    const HOME_FLOOR_R = 5.2; // keep in sync with CRATERS[0/1].floorR
+
+    const okSpot = (x: number, y: number, sep: number, minCoreDist = 1.85) => {
+      x = (x + MAP_W) % MAP_W;
+      y = clamp(y, 1.2, MAP_H - 1.2);
+      if (!canGroundOccupy(x, y)) return null;
+      if (!cellInReach(this.reachUnion, x, y)) return null;
+      for (const c of [START_P0, START_P1]) {
+        if (dist(x, y, c.x, c.y) < minCoreDist) return null;
+      }
+      for (const m of this.minerals) {
+        if (dist(x, y, m.x, m.y) < sep) return null;
+      }
+      return { x, y };
+    };
+
+    const pushCrystal = (x: number, y: number, stock: number, minCoreDist = 1.85) => {
+      const p = okSpot(x, y, minCrystalSep, minCoreDist);
+      if (!p) return 0;
+      const maxYield = clamp(Math.round(stock), 20, 100);
+      this.minerals.push({ id: allocId(), x: p.x, y: p.y, yield: maxYield, maxYield });
+      return maxYield;
+    };
+
+    const addField = (
+      cx: number,
+      cy: number,
+      crystalCount: number,
+      avgStock: number,
+      radius = 0.72,
+      minCoreDist = 1.85,
+    ) => {
+      for (const f of fieldCenters) {
+        if (dist(cx, cy, f.x, f.y) < minFieldSep) return 0;
+      }
+      if (!canGroundOccupy(cx, cy)) return 0;
+      fieldCenters.push({ x: cx, y: cy });
+      const n = clamp(crystalCount, 2, 14);
+      let placed = 0;
+      let gained = 0;
+      for (let i = 0; i < n * 8 && placed < n; i++) {
+        const a = (placed / n) * Math.PI * 2 + Math.random() * 0.45 + i * 0.17;
+        const r =
+          placed === 0
+            ? 0.08 + Math.random() * 0.12
+            : radius * (0.4 + Math.random() * 0.6);
+        const stock = avgStock * (0.78 + Math.random() * 0.4);
+        const got = pushCrystal(cx + Math.cos(a) * r, cy + Math.sin(a) * r, stock, minCoreDist);
+        if (got > 0) {
+          placed++;
+          gained += got;
+        }
+      }
+      return gained;
+    };
+
+    const seedHomeCrater = (hx: number, hy: number, target: number) => {
+      let stock = 0;
+      let guard = 0;
+      const rings = [
+        { r0: 2.05, r1: 3.0, n: 12, crystals: 7, avg: 70, rad: 0.72 },
+        { r0: 3.0, r1: 4.1, n: 14, crystals: 6, avg: 62, rad: 0.7 },
+        { r0: 3.9, r1: HOME_FLOOR_R - 0.35, n: 12, crystals: 5, avg: 48, rad: 0.62 },
+      ];
+      for (const ring of rings) {
+        for (let i = 0; i < ring.n && stock < target && guard < 360; i++) {
+          guard++;
+          const a = (i / ring.n) * Math.PI * 2 + (Math.random() - 0.5) * 0.35 + hx * 0.01;
+          const r = ring.r0 + Math.random() * (ring.r1 - ring.r0);
+          const fx = hx + Math.cos(a) * r;
+          const fy = hy + Math.sin(a) * r;
+          stock += addField(fx, fy, ring.crystals, ring.avg, ring.rad, 1.7);
+        }
+      }
+      guard = 0;
+      while (stock < target && guard++ < 700) {
+        const a = Math.random() * Math.PI * 2;
+        const r = 2.0 + Math.random() * (HOME_FLOOR_R - 2.15);
+        const s = 28 + Math.random() * 55;
+        stock += pushCrystal(hx + Math.cos(a) * r, hy + Math.sin(a) * r, s, 1.7);
+      }
+      return stock;
+    };
+
+    const home0 = seedHomeCrater(START_P0.x, START_P0.y, HOME_STOCK_TARGET);
+    const home1 = seedHomeCrater(START_P1.x, START_P1.y, HOME_STOCK_TARGET);
+
+    const mid = [
+      [0.5 - 1.8, 0.5 + 1.1, 8, 88, 1.0],
+      [0.5 + 1.8, 0.5 - 1.1, 8, 88, 1.0],
+      [0.5 + 0.2, 0.5 + 2.2, 6, 70, 0.85],
+      [0.38, 0.62, 7, 60, 0.9],
+      [0.62, 0.38, 7, 60, 0.9],
+      [0.45, 0.48, 6, 65, 0.8],
+      [0.55, 0.52, 6, 65, 0.8],
+      [0.42, 0.55, 5, 55, 0.75],
+      [0.58, 0.45, 5, 55, 0.75],
+      [0.35, 0.5, 5, 50, 0.7],
+      [0.65, 0.5, 5, 50, 0.7],
+      [0.5, 0.4, 5, 55, 0.75],
+      [0.5, 0.6, 5, 55, 0.75],
+      [0.48, 0.35, 4, 48, 0.7],
+      [0.52, 0.65, 4, 48, 0.7],
+    ] as const;
+    for (const [fx, fy, n, avg, rad] of mid) {
+      addField(MAP_W * fx, MAP_H * fy, n, avg, rad);
+    }
+
+    let scatter = 0;
+    for (let attempt = 0; attempt < 500 && scatter < 36; attempt++) {
+      const x = 2.5 + Math.random() * (MAP_W - 5);
+      const y = 2.5 + Math.random() * (MAP_H - 5);
+      if (dist(x, y, START_P0.x, START_P0.y) < HOME_FLOOR_R + 0.6) continue;
+      if (dist(x, y, START_P1.x, START_P1.y) < HOME_FLOOR_R + 0.6) continue;
+      const n = 3 + ((Math.random() * 4) | 0);
+      const stock = 22 + Math.random() * 40;
+      const before = this.minerals.length;
+      addField(x, y, n, stock, 0.65 + Math.random() * 0.25);
+      if (this.minerals.length > before) scatter++;
+    }
+
+    void home0;
+    void home1;
   }
 
   private spawnCore(owner: PlayerId, x: number, y: number) {
     const def = BUILDINGS.core;
     this.buildings.push({
-      id: id(),
+      id: allocId(),
       owner,
       kind: "core",
       x,
@@ -171,18 +328,21 @@ export class GameSim {
       produceTimer: def.produceTime ?? 4,
       attackTimer: 0,
       linkedMineralId: null,
+      fromCard: null,
+      isTech: false,
     });
     this.markOcc(x, y, true);
   }
 
-  private spawnUnit(owner: PlayerId, kind: UnitKind, x: number, y: number) {
+  spawnUnit(owner: PlayerId, kind: UnitKind, x: number, y: number) {
     const def = UNITS[kind];
+    const walk = nearestWalkable(x, y, 4) ?? { x, y };
     this.units.push({
-      id: id(),
+      id: allocId(),
       owner,
       kind,
-      x: (x + MAP_W) % MAP_W,
-      y: clamp(y, 0.5, MAP_H - 0.5),
+      x: (walk.x + MAP_W) % MAP_W,
+      y: clamp(walk.y, 0.5, MAP_H - 0.5),
       hp: def.hp,
       maxHp: def.hp,
       targetId: null,
@@ -191,14 +351,43 @@ export class GameSim {
       buildTargetId: null,
       mineMineralId: null,
       carrying: false,
+      cargo: 0,
       mineProgress: 0,
+      exploreX: null,
+      exploreY: null,
     });
   }
 
-  private markOcc(x: number, y: number, on: boolean) {
+  markOcc(x: number, y: number, on: boolean) {
     const k = cellKey(x, y);
     if (on) this.occupied.add(k);
     else this.occupied.delete(k);
+  }
+
+  moveGroundUnit(u: Unit, tx: number, ty: number, speed: number, dt: number) {
+    const mul = moveSpeedMul(u.x, u.y, false);
+    const stepLen = speed * Math.max(0.12, mul) * dt;
+    const prev = this.paths.get(u.id);
+    const res = moveAlongPath(prev, u.x, u.y, tx, ty, stepLen, findPath);
+    u.x = res.x;
+    u.y = res.y;
+    this.paths.set(u.id, res.path);
+  }
+
+  /** Path from nearest owned finished building (or start) to a map point. */
+  private hasPathFromBase(owner: PlayerId, x: number, y: number): boolean {
+    let best: { x: number; y: number; d: number } | null = null;
+    for (const b of this.buildings) {
+      if (b.owner !== owner || !b.done) continue;
+      const d = dist(b.x, b.y, x, y);
+      if (!best || d < best.d) best = { x: b.x, y: b.y, d };
+    }
+    if (!best) {
+      const core = owner === 0 ? START_P0 : START_P1;
+      best = { x: core.x, y: core.y, d: dist(core.x, core.y, x, y) };
+    }
+    if (best.d < 1.2 && canGroundOccupy(x, y)) return true;
+    return hasPath(best.x, best.y, x, y);
   }
 
   private pushMsg(s: string) {
@@ -208,57 +397,165 @@ export class GameSim {
     this.msgCd = 2.5;
   }
 
-  /** Public API used by session / bot */
-  tryPlace(player: PlayerId, kind: BuildingKind, x: number, y: number): boolean {
-    return this.place(player, kind, x, y);
+  tryPlace(player: PlayerId, kind: BuildingKind, x: number, y: number, handIndex?: number): boolean {
+    if (handIndex != null) return this.placeFromHand(player, handIndex, x, y);
+    const p = this.players[player]!;
+    const idx = p.hand.findIndex((c) => {
+      const cd = cardOf(c as CardId);
+      return !cd.operation && cd.building === kind;
+    });
+    if (idx < 0) return false;
+    return this.placeFromHand(player, idx, x, y);
   }
 
-  place(player: PlayerId, kind: BuildingKind, x: number, y: number): boolean {
+  recomp(_player: PlayerId): boolean {
+    return false;
+  }
+
+  trashCard(player: PlayerId, handIndex: number): boolean {
+    if (this.phase !== "playing") return false;
+    const p = this.players[player]!;
+    if (handIndex < 0 || handIndex >= p.hand.length) return false;
+    const [c] = p.hand.splice(handIndex, 1);
+    if (c) p.discard.push(c);
+    this.cycleIntoHand(p);
+    return true;
+  }
+
+  canPlacePreview(
+    player: PlayerId,
+    kind: BuildingKind,
+    x: number,
+    y: number,
+    handIndex?: number,
+  ): { ok: boolean; reason: string } {
+    if (this.phase !== "playing") return { ok: false, reason: "Match locked" };
+    const p = this.players[player]!;
+    if (!p?.alive) return { ok: false, reason: "Dead" };
+    const def = BUILDINGS[kind];
+    if (!def?.placeable) return { ok: false, reason: "Can't place" };
+    let cost = Math.round(def.cost * raceCostMul(p.race));
+    if (handIndex != null) {
+      const cid = p.hand[handIndex] as CardId | undefined;
+      if (!cid) return { ok: false, reason: "No card" };
+      const card = cardOf(cid);
+      if (card.building !== kind) return { ok: false, reason: "Wrong card" };
+      cost = card.cost;
+      if (card.prereq && !this.hasPrereq(player, card.prereq)) {
+        return { ok: false, reason: `Need ${card.prereq}` };
+      }
+    } else {
+      if (!p.hand.some((c) => cardOf(c as CardId).building === kind))
+        return { ok: false, reason: "Not in hand" };
+      const cid = p.hand.find((c) => cardOf(c as CardId).building === kind)!;
+      const card = cardOf(cid as CardId);
+      cost = card.cost;
+      if (card.prereq && !this.hasPrereq(player, card.prereq)) {
+        return { ok: false, reason: `Need ${card.prereq}` };
+      }
+    }
+    if (p.energy < cost) return { ok: false, reason: "Need energy" };
+    x = (x + MAP_W) % MAP_W;
+    y = clamp(y, 1, MAP_H - 1);
+    if (!canPlaceBuilding(x, y)) return { ok: false, reason: "Bad terrain" };
+    if (this.occupied.has(cellKey(x, y))) return { ok: false, reason: "Blocked" };
+    for (const b of this.buildings) {
+      if (dist(b.x, b.y, x, y) < BUILD_MIN_DIST) return { ok: false, reason: "Too close" };
+    }
+    if (!this.hasPathFromBase(player, x, y)) return { ok: false, reason: "No path" };
+    if (kind === "extractor") {
+      let bestD = EXTRACTOR_LINK_RANGE;
+      let found = false;
+      for (const mm of this.minerals) {
+        const d = dist(mm.x, mm.y, x, y);
+        if (d < bestD) {
+          bestD = d;
+          found = true;
+        }
+      }
+      if (!found) return { ok: false, reason: "Need crystal" };
+    }
+    return { ok: true, reason: "Ready" };
+  }
+
+
+  cancelOp(player: PlayerId, opId?: number): boolean {
+    const doomed = this.ops.filter(
+      (o) => o.owner === player && (opId == null || o.id === opId),
+    );
+    if (!doomed.length) return false;
+    this.ops = this.ops.filter(
+      (o) => !(o.owner === player && (opId == null || o.id === opId)),
+    );
+    for (const o of doomed) this.resolveOpCard(player, o.cardId);
+    return true;
+  }
+
+  castOp(player: PlayerId, handIndex: number, x: number, y: number): boolean {
     if (this.phase !== "playing") return false;
     const p = this.players[player]!;
     if (!p.alive) return false;
-    const def = BUILDINGS[kind];
-    if (!def.placeable) return false;
-    const cost = Math.round(def.cost * raceCostMul(p.race));
-    if (p.energy < cost) return false;
+    const cid = p.hand[handIndex] as CardId | undefined;
+    if (!cid) return false;
+    const card = cardOf(cid);
+    if (!card.operation || !card.opKind) return false;
+    if (p.energy < card.cost) return false;
     x = (x + MAP_W) % MAP_W;
     y = clamp(y, 1, MAP_H - 1);
-    if (!canPlaceBuilding(x, y)) {
-      this.pushMsg("Can't build on crater rim — use floor or a pass");
-      return false;
-    }
-    if (this.occupied.has(cellKey(x, y))) {
-      this.pushMsg("Blocked — too close to another structure");
-      return false;
-    }
-    for (const b of this.buildings) {
-      if (dist(b.x, b.y, x, y) < 1.35) {
-        this.pushMsg("Too close to another structure");
-        return false;
-      }
-    }
+    p.energy -= card.cost;
+    // Card stays in hand until op ends/cancels
+    const radius = card.opRadius ?? 1.35;
+    this.ops.push(
+      makeOp(allocId(), player, cid, card.opKind, x, y, radius, this.t, this.units),
+    );
+    this.pushMsg(`${card.short.toUpperCase()} // mark set`);
+    return true;
+  }
 
+  placeFromHand(player: PlayerId, handIndex: number, x: number, y: number): boolean {
+    if (this.phase !== "playing") return false;
+    const p = this.players[player]!;
+    if (!p.alive) return false;
+    const cid = p.hand[handIndex] as CardId | undefined;
+    if (!cid) return false;
+    const card = cardOf(cid);
+    if (card.operation || !card.building) return false;
+    const kind = card.building;
+    const def = BUILDINGS[kind];
+    if (!def?.placeable) return false;
+    if (card.prereq && !this.hasPrereq(player, card.prereq)) return false;
+    if (p.energy < card.cost) return false;
+    x = (x + MAP_W) % MAP_W;
+    y = clamp(y, 1, MAP_H - 1);
+    if (!canPlaceBuilding(x, y)) return false;
+    if (this.occupied.has(cellKey(x, y))) return false;
+    for (const b of this.buildings) {
+      if (dist(b.x, b.y, x, y) < BUILD_MIN_DIST) return false;
+    }
+    if (!this.hasPathFromBase(player, x, y)) return false;
     let linked: number | null = null;
     if (kind === "extractor") {
       let best: Mineral | null = null;
       let bestD = EXTRACTOR_LINK_RANGE;
-      for (const m of this.minerals) {
-        const d = dist(m.x, m.y, x, y);
+      for (const mm of this.minerals) {
+        const d = dist(mm.x, mm.y, x, y);
         if (d < bestD) {
           bestD = d;
-          best = m;
+          best = mm;
         }
       }
-      if (!best) {
-        this.pushMsg("Extractors need a crystal field");
-        return false;
-      }
+      if (!best) return false;
       linked = best.id;
     }
-
-    p.energy -= cost;
+    p.hand.splice(handIndex, 1);
+    p.energy -= card.cost;
+    if (!card.tech) p.discard.push(cid);
+    if (card.tech && !p.techsPlaced.includes(kind)) {
+      p.techsPlaced.push(kind);
+      this.reshuffleDiscardIntoDraw(p);
+    }
     this.buildings.push({
-      id: id(),
+      id: allocId(),
       owner: player,
       kind,
       x,
@@ -272,10 +569,11 @@ export class GameSim {
       produceTimer: 0,
       attackTimer: 0,
       linkedMineralId: linked,
+      fromCard: cid,
+      isTech: card.tech,
     });
     this.markOcc(x, y, true);
-
-    // nearest free worker starts construction
+    this.cycleIntoHand(p);
     let bestW: Unit | null = null;
     let bestD = 99;
     for (const u of this.units) {
@@ -288,27 +586,86 @@ export class GameSim {
     }
     if (bestW) {
       bestW.buildTargetId = this.buildings[this.buildings.length - 1]!.id;
-      bestW.carrying = true;
+      bestW.carrying = false;
+      bestW.cargo = 0;
       bestW.mineMineralId = null;
       bestW.mineProgress = 0;
+      bestW.exploreX = null;
+      bestW.exploreY = null;
+      this.paths.delete(bestW.id);
     } else {
       this.pushMsg("No free workers — build will idle");
     }
     return true;
   }
 
-  applyIntent(intent: Intent) {
-    if (intent.type === "place") this.place(intent.player, intent.kind, intent.x, intent.y);
+  place(player: PlayerId, kind: BuildingKind, x: number, y: number): boolean {
+    return this.tryPlace(player, kind, x, y);
   }
 
+  applyIntent(intent: Intent) {
+    if (intent.type === "place")
+      this.placeFromHand(intent.player, intent.handIndex, intent.x, intent.y);
+    else if (intent.type === "castOp")
+      this.castOp(intent.player, intent.handIndex, intent.x, intent.y);
+    else if (intent.type === "trash") this.trashCard(intent.player, intent.handIndex);
+  }
+
+  private tickDraw(_dt: number) {
+    // Timed draw removed — CR-style cycle.
+  }
+
+  onBuildingFinished(b: Building) {
+    if (!b.isTech || !b.fromCard) return;
+    const card = CARDS[b.fromCard as CardId];
+    if (!card?.inject?.length) return;
+    const p = this.players[b.owner]!;
+    for (const id of card.inject) p.discard.push(id);
+    this.pushMsg(`${card.short} // blueprints to discard`);
+  }
+
+
   private refreshWorkerCaps() {
+    this.refreshCapacity();
+  }
+
+  /** Rebuild capMax from cores + race supply buildings. Also energyMax from capacitors. */
+  refreshCapacity() {
     for (const p of this.players) {
-      const ex = this.buildings.filter(
-        (b) =>
-          b.owner === p.id && b.kind === "extractor" && b.done && b.linkedMineralId != null,
-      ).length;
-      p.workerCap = CORE_WORKER_CAP + ex * EXTRACTOR_WORKER_BONUS;
+      let cap = 0;
+      let caps = 0;
+      for (const b of this.buildings) {
+        if (b.owner !== p.id || !b.done) continue;
+        if (b.kind === "core") cap += CORE_CAP;
+        else if (b.kind === "dome") cap += DOME_CAP;
+        else if (b.kind === "refinery") cap += REFINERY_CAP;
+        else if (b.kind === "extractor" && p.race !== "operators") cap += EXTRACTOR_CAP_BONUS;
+        else if (b.kind === "capacitor") caps += 1;
+      }
+      p.capMax = Math.max(0, cap);
+      p.workerCap = p.capMax;
+      p.energyMax = ENERGY_MAX_BASE + caps * CAPACITOR_ENERGY_BONUS;
     }
+  }
+
+  hasPrereq(player: PlayerId, kind: BuildingKind): boolean {
+    return this.buildings.some(
+      (b) => b.owner === player && b.kind === kind && b.done,
+    );
+  }
+
+  /** How much capacity a player is currently using. */
+  capUsed(owner: PlayerId): number {
+    let used = 0;
+    for (const u of this.units) {
+      if (u.owner === owner) used += unitCapCost(u.kind);
+    }
+    return used;
+  }
+
+  freeCap(owner: PlayerId): number {
+    const p = this.players[owner]!;
+    return Math.max(0, p.capMax - this.capUsed(owner));
   }
 
   step(dt: number = TICK_DT) {
@@ -316,19 +673,37 @@ export class GameSim {
     this.t += dt;
     if (this.msgCd > 0) this.msgCd -= dt;
     if (this.phase === "playing" && this.t >= MATCH_SECONDS) {
-      this.phase = "overtime";
-      this.pushMsg("Overtime — no new builds or units");
+      this.endByClock();
+      return;
     }
     this.tickIncome(dt);
+    for (const p of this.players) {
+      if (p.energy > p.energyMax) p.energy = p.energyMax;
+    }
+    this.tickDraw(dt);
     this.tickWorkers(dt);
+    stampAllVisits(this);
     this.tickProduction(dt);
     this.tickCombat(dt);
     this.tickProjectiles(dt);
     this.tickMovement(dt);
+    const opsBefore = this.ops.map((o) => ({ id: o.id, owner: o.owner, cardId: o.cardId }));
+    tickOperations(this, dt);
+    const still = new Set(this.ops.map((o) => o.id));
+    for (const o of opsBefore) {
+      if (!still.has(o.id)) this.resolveOpCard(o.owner, o.cardId);
+    }
     this.tickSeparation(dt);
-    this.refreshWorkerCaps();
+    this.refreshCapacity();
     this.recomputeVision();
+    this.pruneFloaters();
     this.checkWin();
+  }
+
+  private pruneFloaters() {
+    const life = 1.35;
+    if (this.floaters.length === 0) return;
+    this.floaters = this.floaters.filter((f) => this.t - f.born < life);
   }
 
   private tickIncome(_dt: number) {
@@ -344,246 +719,26 @@ export class GameSim {
           u.buildTargetId == null,
       ).length;
       const ex = this.buildings.filter(
-        (b) => b.owner === p.id && b.kind === "extractor" && b.done,
+        (b) =>
+          b.owner === p.id &&
+          b.done &&
+          (b.kind === "extractor" || b.kind === "refinery" || b.kind === "depot"),
       ).length;
       const cycle = Math.max(2.2, 3.4 - ex * 0.25);
       let income = miners * (MINE_TRIP_YIELD / cycle);
-      if (p.race === "operators") income *= 1.04;
-      if (p.race === "blight") income *= 1.06;
       p.income = income;
     }
   }
 
-  private pickMineFor(owner: PlayerId, wx: number, wy: number): Mineral | null {
-    // Prefer crystals linked to own extractors, else nearest crystal
-    const linked = new Set(
-      this.buildings
-        .filter(
-          (b) =>
-            b.owner === owner && b.kind === "extractor" && b.done && b.linkedMineralId != null,
-        )
-        .map((b) => b.linkedMineralId!),
-    );
-    let best: Mineral | null = null;
-    let bestScore = 1e9;
-    for (const m of this.minerals) {
-      const d = dist(wx, wy, m.x, m.y);
-      const score = d + (linked.has(m.id) ? -8 : 0);
-      if (score < bestScore) {
-        bestScore = score;
-        best = m;
-      }
-    }
-    return best;
-  }
-
-  /** Nearest drop-off: prefer extractor linked to this crystal, then any own extractor, then core. */
-  private pickDropoff(
-    owner: PlayerId,
-    wx: number,
-    wy: number,
-    mineralId: number | null,
-  ): { x: number; y: number; id: number } | null {
-    let best: { x: number; y: number; id: number } | null = null;
-    let bestScore = 1e9;
-    for (const b of this.buildings) {
-      if (b.owner !== owner || !b.done) continue;
-      if (b.kind !== "extractor" && b.kind !== "core") continue;
-      const d = dist(wx, wy, b.x, b.y);
-      let score = d;
-      if (b.kind === "core") score += 4; // prefer extractors when similar distance
-      else if (mineralId != null && b.linkedMineralId === mineralId) score -= 6;
-      else score -= 1.5;
-      if (score < bestScore) {
-        bestScore = score;
-        best = { x: b.x, y: b.y, id: b.id };
-      }
-    }
-    return best;
-  }
-
   private tickWorkers(dt: number) {
-    for (const u of this.units) {
-      if (u.kind !== "worker") continue;
-      const sp = UNITS.worker.speed * (this.players[u.owner]!.race === "operators" ? 1.1 : 1);
-      const p = this.players[u.owner]!;
-
-      // —— Construction takes priority ——
-      if (u.buildTargetId != null) {
-        u.mineMineralId = null;
-        u.mineProgress = 0;
-        const b = this.buildings.find((x) => x.id === u.buildTargetId);
-        if (!b || b.done) {
-          u.buildTargetId = null;
-          u.carrying = false;
-          continue;
-        }
-        const d = dist(u.x, u.y, b.x, b.y);
-        if (d > 0.55) {
-          const mul = moveSpeedMul(u.x, u.y, false);
-          const pos = stepGround(u.x, u.y, b.x, b.y, sp * mul * dt);
-          u.x = pos.x;
-          u.y = pos.y;
-        } else {
-          b.progress += dt / Math.max(0.5, b.buildTime);
-          b.hp = Math.min(b.maxHp, b.maxHp * (0.15 + 0.85 * b.progress));
-          if (b.progress >= 1) {
-            b.done = true;
-            b.progress = 1;
-            b.hp = b.maxHp;
-            u.buildTargetId = null;
-            u.carrying = false;
-            if (BUILDINGS[b.kind].produces) b.produceTimer = BUILDINGS[b.kind].produceTime ?? 5;
-            this.refreshWorkerCaps();
-          }
-        }
-        continue;
-      }
-
-      // —— Haul load to nearest extractor / core ——
-      if (u.carrying) {
-        const drop = this.pickDropoff(u.owner, u.x, u.y, u.mineMineralId);
-        if (!drop) {
-          u.carrying = false;
-          continue;
-        }
-        const dDrop = dist(u.x, u.y, drop.x, drop.y);
-        const dropR = 0.7;
-        if (dDrop > dropR) {
-          const mul = moveSpeedMul(u.x, u.y, false);
-          const pos = stepGround(u.x, u.y, drop.x, drop.y, sp * mul * dt);
-          u.x = pos.x;
-          u.y = pos.y;
-        } else {
-          // Deposit
-          let yieldAmt = MINE_TRIP_YIELD;
-          if (p.race === "operators") yieldAmt *= 1.04;
-          if (p.race === "blight") yieldAmt *= 1.06;
-          p.energy += yieldAmt;
-          u.carrying = false;
-          u.mineProgress = 0;
-          // keep mineMineralId so they return to the same field
-        }
-        continue;
-      }
-
-      // —— Empty: walk to crystal, channel, fill cargo ——
-      let m =
-        u.mineMineralId != null
-          ? this.minerals.find((mm) => mm.id === u.mineMineralId) ?? null
-          : null;
-      if (!m) {
-        m = this.pickMineFor(u.owner, u.x, u.y);
-        u.mineMineralId = m?.id ?? null;
-        u.mineProgress = 0;
-      }
-      if (!m) continue;
-
-      const mineRange = 0.85;
-      const ang = slotAngle(u.id, 10);
-      const holdR = 0.5 + (u.id % 3) * 0.1;
-      const hx = m.x + Math.cos(ang) * holdR;
-      const hy = clamp(m.y + Math.sin(ang) * holdR * 0.85, 0.5, MAP_H - 0.5);
-      const dHold = dist(u.x, u.y, hx, hy);
-      const d = dist(u.x, u.y, m.x, m.y);
-
-      if (d > mineRange || dHold > 0.12) {
-        // Approach pad
-        const mul = moveSpeedMul(u.x, u.y, false);
-        const pos = stepGround(u.x, u.y, hx, hy, sp * (d > mineRange ? 1 : 0.4) * mul * dt);
-        u.x = pos.x;
-        u.y = pos.y;
-        u.mineProgress = 0;
-      } else {
-        // Channel at crystal
-        u.mineProgress = Math.min(1, u.mineProgress + dt / MINE_CHANNEL);
-        u.attackTimer -= dt;
-        if (u.attackTimer <= 0) {
-          this.fire(
-            u.owner,
-            u.x,
-            u.y,
-            m.x,
-            m.y,
-            m.id,
-            false,
-            0,
-            "mine",
-            0.55,
-            0.9,
-            true,
-          );
-          u.attackTimer = 0.28;
-        }
-        if (u.mineProgress >= 1) {
-          u.carrying = true;
-          u.mineProgress = 0;
-        }
-      }
-    }
+    tickWorkers(this, dt);
   }
 
   private tickProduction(dt: number) {
-    if (this.phase === "overtime") return;
-    for (const b of this.buildings) {
-      if (!b.done) continue;
-      const def = BUILDINGS[b.kind];
-      if (!def.produces) continue;
-      const p = this.players[b.owner]!;
-      if (!p.alive) continue;
-      const army = this.units.filter((u) => u.owner === b.owner && u.kind !== "worker").length;
-      if (def.produces !== "worker" && army >= 32) continue;
-      b.produceTimer -= dt;
-      if (b.produceTimer > 0) continue;
-
-      if (def.produces === "worker") {
-        const workers = this.units.filter((u) => u.owner === b.owner && u.kind === "worker").length;
-        if (workers >= p.workerCap) {
-          b.produceTimer = 1.5;
-          continue;
-        }
-        const a = Math.random() * Math.PI * 2;
-        this.spawnUnit(
-          b.owner,
-          "worker",
-          b.x + Math.cos(a) * (1.0 + Math.random() * 0.8),
-          b.y + Math.sin(a) * (1.0 + Math.random() * 0.8),
-        );
-        b.produceTimer = def.produceTime ?? 4;
-        continue;
-      }
-
-      // One living scout per Scout Works
-      if (def.produces === "scout") {
-        const pads = this.buildings.filter(
-          (x) => x.owner === b.owner && x.kind === "scout" && x.done,
-        ).length;
-        const scouts = this.units.filter((u) => u.owner === b.owner && u.kind === "scout").length;
-        if (scouts >= pads) {
-          b.produceTimer = 1.2;
-          continue;
-        }
-      }
-
-      const cost = def.produceCost ?? 0;
-      if (p.energy < cost) {
-        b.produceTimer = 0.5;
-        continue;
-      }
-      p.energy -= cost;
-      const ang = Math.random() * Math.PI * 2;
-      const rad = 1.3 + Math.random() * 1.1;
-      this.spawnUnit(
-        b.owner,
-        def.produces,
-        b.x + Math.cos(ang) * rad,
-        b.y + Math.sin(ang) * rad,
-      );
-      b.produceTimer = def.produceTime ?? 6;
-    }
+    tickProduction(this, dt);
   }
 
-  private fire(
+  fire(
     owner: PlayerId,
     x: number,
     y: number,
@@ -597,448 +752,37 @@ export class GameSim {
     toAir: number,
     targetIsMineral = false,
   ) {
-    const d = dist(x, y, tx, ty);
-    // mine beams are held; lasers fast; shells slow
-    const speed =
-      style === "mine" ? 0 : style === "laser" ? 28 : style === "shell" ? 10 : 16;
-    const maxAge =
-      style === "mine" ? 0.28 : Math.max(0.12, (d / Math.max(speed, 1)) + 0.05);
-    this.projectiles.push({
-      id: id(),
+    fireProjectile(
+      this,
       owner,
       x,
       y,
-      ox: x,
-      oy: y,
       tx,
       ty,
       targetId,
       targetIsBuilding,
-      targetIsMineral,
       damage,
-      speed,
       style,
       fromAir,
       toAir,
-      age: 0,
-      maxAge,
-    });
+      targetIsMineral,
+    );
   }
 
   private tickCombat(dt: number) {
-    for (const b of this.buildings) {
-      if (!b.done) continue;
-      const def = BUILDINGS[b.kind];
-      if (!def.range) continue;
-      b.attackTimer -= dt;
-      if (b.attackTimer > 0) continue;
-      const target = this.findBuildingTarget(b, def);
-      if (!target) continue;
-      if (target.kind === "unit") {
-        const air = UNITS[target.unit.kind].air;
-        let deal = 0;
-        if (air && def.attackAir) deal = def.attackAir;
-        else if (!air && def.attackGround) deal = def.attackGround;
-        if (deal > 0) {
-          this.fire(
-            b.owner,
-            b.x,
-            b.y,
-            target.unit.x,
-            target.unit.y,
-            target.unit.id,
-            false,
-            deal,
-            buildingShotStyle(b.kind),
-            0.35,
-            air ? 1 : 0.15,
-          );
-          b.attackTimer = 0.55;
-        }
-      } else if (def.attackGround) {
-        this.fire(
-          b.owner,
-          b.x,
-          b.y,
-          target.building.x,
-          target.building.y,
-          target.building.id,
-          true,
-          def.attackGround,
-          buildingShotStyle(b.kind),
-          0.35,
-          0.4,
-        );
-        b.attackTimer = 0.7;
-      }
-    }
-
-    for (const u of this.units) {
-      if (u.kind === "worker") continue; // workers mine / build only
-      if (u.kind === "scout") {
-        // pure recon — never lock onto combat targets
-        u.targetId = null;
-        u.targetIsBuilding = false;
-        continue;
-      }
-      const def = UNITS[u.kind];
-      u.attackTimer -= dt;
-      const tgt = this.acquireTarget(u);
-      if (!tgt) {
-        u.targetId = null;
-        continue;
-      }
-      u.targetId = tgt.id;
-      u.targetIsBuilding = tgt.isBuilding;
-      if (dist(u.x, u.y, tgt.x, tgt.y) > def.range || u.attackTimer > 0) continue;
-      const mul = raceUnitMul(this.players[u.owner]!.race, u.kind).dmg;
-      const toAir = tgt.isBuilding
-        ? 0.4
-        : UNITS[this.units.find((x) => x.id === tgt.id)?.kind ?? "raider"]?.air
-          ? 1
-          : 0.15;
-      this.fire(
-        u.owner,
-        u.x,
-        u.y,
-        tgt.x,
-        tgt.y,
-        tgt.id,
-        tgt.isBuilding,
-        def.damage * mul,
-        unitShotStyle(u.kind),
-        def.air ? 1 : 0.2,
-        toAir,
-      );
-      u.attackTimer = def.dpsInterval;
-    }
+    tickCombat(this, dt);
   }
 
   private tickProjectiles(dt: number) {
-    const survivors: Projectile[] = [];
-    for (const p of this.projectiles) {
-      p.age += dt;
-
-      // Mining beams: pin origin to living worker, tip to crystal, no travel
-      if (p.style === "mine" || p.targetIsMineral) {
-        const miner = this.units.find(
-          (u) => u.owner === p.owner && u.kind === "worker" && u.mineMineralId === p.targetId,
-        );
-        const m = this.minerals.find((mm) => mm.id === p.targetId);
-        if (!m || p.age >= p.maxAge) continue;
-        if (miner) {
-          p.ox = miner.x;
-          p.oy = miner.y;
-          p.x = miner.x;
-          p.y = miner.y;
-        }
-        p.tx = m.x;
-        p.ty = m.y;
-        survivors.push(p);
-        continue;
-      }
-
-      // home toward live target
-      if (p.targetIsBuilding) {
-        const b = this.buildings.find((x) => x.id === p.targetId);
-        if (b) {
-          p.tx = b.x;
-          p.ty = b.y;
-        }
-      } else {
-        const u = this.units.find((x) => x.id === p.targetId);
-        if (u) {
-          p.tx = u.x;
-          p.ty = u.y;
-          p.toAir = UNITS[u.kind].air ? 1 : 0.15;
-        }
-      }
-
-      let dx = p.tx - p.x;
-      if (dx > MAP_W / 2) dx -= MAP_W;
-      if (dx < -MAP_W / 2) dx += MAP_W;
-      const dy = p.ty - p.y;
-      const d = Math.hypot(dx, dy);
-      const step = p.speed * dt;
-
-      if (d <= step || p.age >= p.maxAge) {
-        if (p.damage > 0) {
-          if (p.targetIsBuilding) {
-            const b = this.buildings.find((x) => x.id === p.targetId);
-            if (b) b.hp -= p.damage;
-          } else {
-            const u = this.units.find((x) => x.id === p.targetId);
-            if (u) u.hp -= p.damage;
-          }
-        }
-        continue;
-      }
-      p.x = (p.x + (dx / d) * step + MAP_W) % MAP_W;
-      p.y = clamp(p.y + (dy / d) * step, 0.2, MAP_H - 0.2);
-      survivors.push(p);
-    }
-    this.projectiles = survivors;
-
-    // cleanup dead after projectile hits
-    for (const b of this.buildings) {
-      if (b.hp <= 0) {
-        this.markOcc(b.x, b.y, false);
-        for (const u of this.units) {
-          if (u.buildTargetId === b.id) {
-            u.buildTargetId = null;
-            u.carrying = false;
-          }
-        }
-      }
-    }
-    this.buildings = this.buildings.filter((b) => b.hp > 0);
-    this.units = this.units.filter((u) => u.hp > 0);
-  }
-
-  private findBuildingTarget(
-    b: Building,
-    def: (typeof BUILDINGS)[BuildingKind],
-  ):
-    | { kind: "unit"; unit: Unit }
-    | { kind: "building"; building: Building }
-    | null {
-    const range = def.range ?? 0;
-    let best: { kind: "unit"; unit: Unit } | { kind: "building"; building: Building } | null =
-      null;
-    let bestD = range + 0.01;
-    for (const u of this.units) {
-      if (u.owner === b.owner) continue;
-      const air = UNITS[u.kind].air;
-      if (air && !def.attackAir) continue;
-      if (!air && !def.attackGround) continue;
-      const d = dist(b.x, b.y, u.x, u.y);
-      if (d < bestD) {
-        bestD = d;
-        best = { kind: "unit", unit: u };
-      }
-    }
-    if (def.attackGround) {
-      for (const ob of this.buildings) {
-        if (ob.owner === b.owner) continue;
-        const d = dist(b.x, b.y, ob.x, ob.y);
-        if (d < bestD) {
-          bestD = d;
-          best = { kind: "building", building: ob };
-        }
-      }
-    }
-    return best;
-  }
-
-  private acquireTarget(u: Unit): { id: number; x: number; y: number; isBuilding: boolean } | null {
-    const def = UNITS[u.kind];
-    let best: { id: number; x: number; y: number; isBuilding: boolean } | null = null;
-    let bestD = 99;
-    const scan = Math.max(def.range + 7, 9);
-    for (const ou of this.units) {
-      if (ou.owner === u.owner) continue;
-      const oAir = UNITS[ou.kind].air;
-      if (oAir && !def.attackAir) continue;
-      if (!oAir && !def.attackGround) continue;
-      const d = dist(u.x, u.y, ou.x, ou.y);
-      if (d < bestD && d < scan) {
-        bestD = d;
-        best = { id: ou.id, x: ou.x, y: ou.y, isBuilding: false };
-      }
-    }
-    if (def.attackGround) {
-      for (const b of this.buildings) {
-        if (b.owner === u.owner) continue;
-        const d = dist(u.x, u.y, b.x, b.y);
-        const bias = b.kind === "core" ? -0.5 : 0;
-        if (d + bias < bestD && d < scan) {
-          bestD = d + bias;
-          best = { id: b.id, x: b.x, y: b.y, isBuilding: true };
-        }
-      }
-    }
-    return best;
-  }
-
-  private scoutPatrolPoint(u: Unit): { x: number; y: number } {
-    // Cycle map waypoints so drones keep sweeping instead of parking on contacts
-    const enemyCore = this.buildings.find((b) => b.owner !== u.owner && b.kind === "core");
-    const home = this.buildings.find((b) => b.owner === u.owner && b.kind === "core");
-    const period = 7.5;
-    const phase = Math.floor(this.t / period + u.id * 1.37) % 8;
-    const jitter = (seed: number) => {
-      const s = Math.sin(u.id * 12.9898 + seed * 78.233) * 43758.5453;
-      return s - Math.floor(s);
-    };
-    const jx = (jitter(phase) - 0.5) * 3.5;
-    const jy = (jitter(phase + 3) - 0.5) * 2.8;
-    const points: { x: number; y: number }[] = [
-      { x: MAP_W * 0.5 + jx, y: MAP_H * 0.5 + jy },
-      {
-        x: (enemyCore?.x ?? MAP_W * 0.75) + jx * 0.6,
-        y: (enemyCore?.y ?? MAP_H * 0.72) + jy * 0.6,
-      },
-      { x: MAP_W * 0.38 + jx, y: MAP_H * 0.62 + jy },
-      { x: MAP_W * 0.62 + jx, y: MAP_H * 0.38 + jy },
-      {
-        x: (enemyCore?.x ?? MAP_W * 0.7) + (u.owner === 0 ? 4 : -4) + jx,
-        y: (enemyCore?.y ?? MAP_H * 0.7) + jy,
-      },
-      { x: MAP_W * 0.2 + jx, y: MAP_H * 0.5 + jy },
-      { x: MAP_W * 0.8 + jx, y: MAP_H * 0.5 + jy },
-      {
-        x: (home?.x ?? MAP_W * 0.25) + (u.owner === 0 ? 6 : -6) + jx,
-        y: MAP_H * 0.5 + jy,
-      },
-    ];
-    const g = points[phase]!;
-    return {
-      x: ((g.x % MAP_W) + MAP_W) % MAP_W,
-      y: clamp(g.y, 1.5, MAP_H - 1.5),
-    };
+    tickProjectiles(this, dt);
   }
 
   private tickMovement(dt: number) {
-    for (const u of this.units) {
-      if (u.kind === "worker") continue; // workers handled in tickWorkers
-      const def = UNITS[u.kind];
-      const speed = def.speed * raceUnitMul(this.players[u.owner]!.race, u.kind).speed;
-      let tx: number | null = null;
-      let ty: number | null = null;
-
-      if (u.kind === "scout") {
-        const g = this.scoutPatrolPoint(u);
-        tx = g.x;
-        ty = g.y;
-      } else if (u.targetId != null) {
-        if (u.targetIsBuilding) {
-          const b = this.buildings.find((x) => x.id === u.targetId);
-          if (b) {
-            tx = b.x;
-            ty = b.y;
-          }
-        } else {
-          const ou = this.units.find((x) => x.id === u.targetId);
-          if (ou) {
-            tx = ou.x;
-            ty = ou.y;
-          }
-        }
-      }
-      if (tx == null) {
-        const enemyCore = this.buildings.find((b) => b.owner !== u.owner && b.kind === "core");
-        if (enemyCore) {
-          tx = enemyCore.x;
-          ty = enemyCore.y;
-        }
-      }
-      if (tx == null || ty == null) continue;
-
-      // Approach slot around combat target (not scouts — they fly through waypoints)
-      if (u.kind !== "scout" && u.targetId != null) {
-        const ang = slotAngle(u.id, 12);
-        const orbit = Math.max(0.55, def.range * 0.72);
-        tx = tx + Math.cos(ang) * orbit;
-        ty = clamp(ty + Math.sin(ang) * orbit * 0.8, 0.5, MAP_H - 0.5);
-      }
-
-      let dx = tx - u.x;
-      if (dx > MAP_W / 2) dx -= MAP_W;
-      if (dx < -MAP_W / 2) dx += MAP_W;
-      const dy = ty - u.y;
-      const d = Math.hypot(dx, dy);
-      // Scouts only briefly touch a waypoint then the phase advances — don't hard-stop
-      const stopAt = u.kind === "scout" ? 0.85 : u.targetId != null ? 0.35 : 0.4;
-      if (d <= stopAt) {
-        if (u.kind === "scout") {
-          // drift past waypoint so motion never freezes
-          const drift = slotAngle(u.id + Math.floor(this.t), 16);
-          u.x = (u.x + Math.cos(drift) * speed * 0.35 * dt + MAP_W) % MAP_W;
-          u.y = clamp(u.y + Math.sin(drift) * speed * 0.35 * dt, 0.5, MAP_H - 0.5);
-        }
-        continue;
-      }
-      if (def.air) {
-        u.x = (u.x + (dx / d) * speed * dt + MAP_W) % MAP_W;
-        u.y = clamp(u.y + (dy / d) * speed * dt, 0.5, MAP_H - 0.5);
-      } else {
-        const mul = moveSpeedMul(u.x, u.y, false);
-        const pos = stepGround(u.x, u.y, tx, ty, speed * Math.max(0.15, mul) * dt);
-        u.x = pos.x;
-        u.y = pos.y;
-      }
-    }
+    tickMovement(this, dt);
   }
 
-  /** Soft collision: push units apart (ground vs ground, air vs air). */
   private tickSeparation(dt: number) {
-    const list = this.units;
-    const n = list.length;
-    if (n < 2) return;
-    // accumulate pushes then apply (symmetric-ish)
-    const px = new Float32Array(n);
-    const py = new Float32Array(n);
-
-    for (let i = 0; i < n; i++) {
-      const a = list[i]!;
-      // Mining workers stand still — don't shove them off the crystal
-      if (a.kind === "worker" && a.carrying) continue;
-      const aAir = UNITS[a.kind].air;
-      const aR = sepRadius(a.kind);
-      for (let j = i + 1; j < n; j++) {
-        const b = list[j]!;
-        if (b.kind === "worker" && b.carrying) continue;
-        if (UNITS[b.kind].air !== aAir) continue;
-        let dx = a.x - b.x;
-        if (dx > MAP_W / 2) dx -= MAP_W;
-        if (dx < -MAP_W / 2) dx += MAP_W;
-        let dy = a.y - b.y;
-        let d = Math.hypot(dx, dy);
-        const minD = aR + sepRadius(b.kind);
-        if (d >= minD) continue;
-        if (d < 1e-4) {
-          const ang = slotAngle(a.id + b.id * 3, 16);
-          dx = Math.cos(ang);
-          dy = Math.sin(ang);
-          d = 1;
-        }
-        const overlap = minD - d;
-        const f = (overlap / minD) * 0.55;
-        const fx = (dx / d) * f;
-        const fy = (dy / d) * f;
-        px[i]! += fx;
-        py[i]! += fy;
-        px[j]! -= fx;
-        py[j]! -= fy;
-      }
-    }
-
-    const pushSpeed = 3.4;
-    for (let i = 0; i < n; i++) {
-      const ax = px[i]!;
-      const ay = py[i]!;
-      const len = Math.hypot(ax, ay);
-      if (len < 1e-5) continue;
-      const u = list[i]!;
-      const step = Math.min(len, 1.25) * pushSpeed * dt;
-      const nx = u.x + (ax / len) * step;
-      const ny = u.y + (ay / len) * step;
-      if (UNITS[u.kind].air) {
-        u.x = (nx + MAP_W) % MAP_W;
-        u.y = clamp(ny, 0.5, MAP_H - 0.5);
-      } else {
-        // only accept separation if not walking into a rim
-        const pos = stepGround(u.x, u.y, nx, ny, step);
-        // if stepGround can't move toward push, try direct if open
-        if (pos.x === u.x && pos.y === u.y && canGroundOccupy(nx, ny)) {
-          u.x = (nx + MAP_W) % MAP_W;
-          u.y = clamp(ny, 0.5, MAP_H - 0.5);
-        } else {
-          u.x = pos.x;
-          u.y = pos.y;
-        }
-      }
-    }
+    tickSeparation(this, dt);
   }
 
   private recomputeVision() {
@@ -1090,14 +834,17 @@ export class GameSim {
       this.players[1]!.alive = false;
       return;
     }
-    if (this.phase === "overtime") {
-      const combat0 = this.units.filter((u) => u.owner === 0 && u.kind !== "worker").length;
-      const combat1 = this.units.filter((u) => u.owner === 1 && u.kind !== "worker").length;
-      if (combat0 === 0 && combat1 === 0) {
-        this.phase = "ended";
-        this.winner = c0.hp === c1.hp ? null : c0.hp > c1.hp ? 0 : 1;
-      }
-    }
+  }
+
+  /** Time expired — higher core HP wins (draw if equal). */
+  private endByClock() {
+    const c0 = this.buildings.find((b) => b.owner === 0 && b.kind === "core");
+    const c1 = this.buildings.find((b) => b.owner === 1 && b.kind === "core");
+    this.phase = "ended";
+    if (!c0 && !c1) this.winner = null;
+    else if (!c0) this.winner = 1;
+    else if (!c1) this.winner = 0;
+    else this.winner = c0.hp === c1.hp ? null : c0.hp > c1.hp ? 0 : 1;
   }
 
   snapshot(): SimSnapshot {
@@ -1112,6 +859,8 @@ export class GameSim {
       units: this.units.map((u) => ({ ...u })),
       minerals: this.minerals.map((m) => ({ ...m })),
       projectiles: this.projectiles.map((p) => ({ ...p })),
+      floaters: this.floaters.map((f) => ({ ...f })),
+      ops: this.ops.map((o) => ({ ...o })),
       messages: [...this.messages],
     };
   }
@@ -1121,20 +870,28 @@ export class GameSim {
       t: this.t,
       phase: this.phase,
       winner: this.winner,
-      nextId,
+      nextId: getNextId(),
       players: this.players.map((p) => ({
         id: p.id,
         race: p.race,
         energy: p.energy,
+        energyMax: p.energyMax,
         income: p.income,
         alive: p.alive,
         workerCap: p.workerCap,
+        capMax: p.capMax,
         vision: Array.from(p.vision),
+        hand: [...p.hand],
+        next: p.next,
+        draw: [...p.draw],
+        discard: [...p.discard],
+        techsPlaced: [...p.techsPlaced],
       })),
       buildings: this.buildings,
       units: this.units,
       minerals: this.minerals,
       projectiles: this.projectiles,
+      floaters: this.floaters,
       messages: this.messages,
     };
   }
@@ -1144,31 +901,69 @@ export class GameSim {
     sim.t = data.t;
     sim.phase = data.phase;
     sim.winner = data.winner;
-    nextId = data.nextId;
+    setNextId(data.nextId);
     sim.buildings = data.buildings.map((b) => ({
       ...b,
       linkedMineralId: b.linkedMineralId ?? null,
+      fromCard: (b as Building).fromCard ?? null,
+      isTech: (b as Building).isTech ?? false,
     }));
     sim.units = data.units.map((u) => ({
       ...u,
       mineMineralId: (u as Unit).mineMineralId ?? null,
       carrying: (u as Unit).carrying ?? false,
+      cargo: (u as Unit & { cargo?: number }).cargo ?? 0,
       mineProgress: (u as Unit).mineProgress ?? 0,
+      exploreX: (u as Unit).exploreX ?? null,
+      exploreY: (u as Unit).exploreY ?? null,
     }));
-    sim.minerals = data.minerals.map((m) => ({ ...m }));
+    sim.minerals = data.minerals.map((m) => {
+      const y = m.yield ?? 40;
+      const maxY = (m as Mineral).maxYield ?? Math.max(y, 40);
+      return { ...m, yield: y, maxYield: maxY };
+    });
     sim.projectiles = (data.projectiles ?? []).map((p) => ({ ...p }));
+    sim.floaters = (data.floaters ?? []).map((f) => ({ ...f }));
+    sim.ops = ((data as { ops?: ActiveOp[] }).ops ?? []).map((o) => ({ ...o }));
     sim.messages = data.messages;
     sim.occupied.clear();
     for (const b of sim.buildings) sim.markOcc(b.x, b.y, true);
-    sim.players = data.players.map((p) => ({
-      id: p.id as PlayerId,
-      race: p.race,
-      energy: p.energy,
-      income: p.income,
-      alive: p.alive,
-      workerCap: p.workerCap ?? CORE_WORKER_CAP,
-      vision: Uint8Array.from(p.vision),
-    }));
+    sim.players = data.players.map((p) => {
+      const raw = p as unknown as {
+        id: PlayerId;
+        race: RaceId;
+        energy: number;
+        energyMax?: number;
+        income: number;
+        alive: boolean;
+        workerCap?: number;
+        capMax?: number;
+        vision: number[];
+        hand?: string[];
+        next?: string | null;
+        draw?: string[];
+        discard?: string[];
+        techsPlaced?: string[];
+      };
+      return {
+        id: raw.id,
+        race: raw.race,
+        energy: raw.energy,
+        energyMax: raw.energyMax ?? ENERGY_MAX_BASE,
+        income: raw.income,
+        alive: raw.alive,
+        workerCap: raw.workerCap ?? CORE_WORKER_CAP,
+        capMax: raw.capMax ?? CORE_CAP,
+        vision: Uint8Array.from(raw.vision),
+        hand: raw.hand ? [...raw.hand] : [],
+        next: raw.next ?? null,
+        draw: raw.draw ? [...raw.draw] : [],
+        discard: raw.discard ? [...raw.discard] : [],
+        techsPlaced: raw.techsPlaced ? [...raw.techsPlaced] : [],
+        visitT: new Float32Array(MAP_W * MAP_H).fill(-1e9),
+      };
+    });
+    sim.refreshCapacity();
     return sim;
   }
 }

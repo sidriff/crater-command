@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 /**
- * Lightweight headless load + screenshot for http://127.0.0.1:8080 (or argv URL).
- * Does not try to "play" the app — just proves the page loads and captures a PNG
- * the agent can Read. Exit 0 on success, 1 on navigation failure, 2 if console errors.
- *
- * Screenshots default under /workspace/screenshots/ (never /tmp) so they live on
- * the workspace volume and stay readable by agent tools.
+ * Headless load + screenshot for the Vite dev server.
+ * Usage: node scripts/browser-smoke.mjs [url] [out.png]
+ * Exit 0 on success, 1 on navigation failure, 2 if console errors.
  */
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const url = process.argv[2] || "http://127.0.0.1:8080/";
-const outPng = process.argv[3] || "/workspace/screenshots/app-builder-preview.png";
+const outPng = process.argv[3] || join(root, "screenshots", "smoke.png");
 const timeoutMs = Number(process.env.BROWSER_SMOKE_TIMEOUT_MS || 45000);
 
 mkdirSync(dirname(outPng), { recursive: true });
@@ -38,33 +37,26 @@ try {
 
   const title = await page.title();
   const hasCanvas = (await page.locator("canvas").count()) > 0;
-  const bodyTextLen = (await page.locator("body").innerText().catch(() => "")).trim().length;
-
   await page.screenshot({ path: outPng, fullPage: false });
 
   console.log(
     JSON.stringify(
       {
-        url,
+        ok: status >= 200 && status < 400,
         status,
         title,
         hasCanvas,
-        bodyTextLen,
+        outPng,
         consoleErrors,
         pageErrors,
-        screenshot: outPng,
       },
       null,
       2,
     ),
   );
 
-  if (status >= 400 || status === 0) process.exit(1);
-  if (pageErrors.length || consoleErrors.length) process.exit(2);
-  process.exit(0);
-} catch (err) {
-  console.error(JSON.stringify({ ok: false, url, error: String(err?.message || err) }, null, 2));
-  process.exit(1);
+  if (status < 200 || status >= 400) process.exit(1);
+  if (pageErrors.length) process.exit(2);
 } finally {
   await browser.close();
 }

@@ -1,0 +1,253 @@
+/* styles/place.css — placement mode chrome */
+/* —— Placement mode (one-thumb: pan world under fixed reticle) —— */
+.place-mode {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+}
+
+.place-mode.hidden {
+  display: none;
+}
+
+.place-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  gap: 0.5rem;
+  padding: 0.65rem 0.65rem max(0.75rem, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82) 40%, transparent);
+}
+
+.place-act {
+  min-height: 64px;
+  min-width: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  border: 1px solid rgba(0, 255, 170, 0.35);
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--phos);
+  touch-action: manipulation;
+}
+
+.place-act-ico {
+  font-size: 1.35rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.place-act-lbl {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.place-cancel {
+  border-color: rgba(255, 80, 100, 0.45);
+  color: #ff8a9a;
+}
+
+.place-cancel:active {
+  background: rgba(255, 80, 100, 0.15);
+}
+
+.place-confirm {
+  border-color: rgba(0, 255, 170, 0.45);
+}
+
+.place-confirm.ok {
+  border-color: var(--phos);
+  box-shadow: 0 0 16px rgba(0, 255, 170, 0.3);
+  background: rgba(0, 255, 170, 0.12);
+}
+
+.place-confirm:disabled {
+  opacity: 0.35;
+  box-shadow: none;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* Confirm ceremony — phosphor flicker (not soft scale fades) */
+.place-cancel.wink-out {
+  animation: place-wink-out 0.4s steps(1, end) forwards;
+  pointer-events: none;
+}
+
+.place-confirm.linger {
+  animation: place-linger 0.7s steps(1, end) forwards;
+  pointer-events: none;
+  opacity: 1 !important;
+  border-color: var(--phos);
+  background: rgba(0, 255, 170, 0.14);
+}
+
+.place-mode.place-committed .place-status {
+  animation: place-status-flash 0.45s steps(1, end);
+}
+
+/* Discrete CRT cut — bright spike, blackout, ghost, dead */
+@keyframes place-wink-out {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+    text-shadow: none;
+  }
+  12% {
+    opacity: 1;
+    filter: brightness(2.4);
+    text-shadow: 0 0 10px rgba(255, 120, 140, 0.9);
+  }
+  18% {
+    opacity: 0;
+    filter: brightness(0);
+  }
+  32% {
+    opacity: 0.75;
+    filter: brightness(1.6);
+  }
+  40% {
+    opacity: 0;
+  }
+  55% {
+    opacity: 0.35;
+    filter: brightness(0.9);
+  }
+  62% {
+    opacity: 0;
+  }
+  78% {
+    opacity: 0.15;
+  }
+  100% {
+    opacity: 0;
+    filter: brightness(0);
+  }
+}
+
+/* ✓ holds hard, stutters, then dims like a phosphor decay */
+@keyframes place-linger {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+    box-shadow: 0 0 12px rgba(0, 255, 170, 0.35);
+  }
+  8% {
+    opacity: 1;
+    filter: brightness(2.2);
+    box-shadow: 0 0 28px rgba(0, 255, 170, 0.75);
+  }
+  14% {
+    opacity: 0.2;
+    filter: brightness(0.4);
+    box-shadow: none;
+  }
+  22% {
+    opacity: 1;
+    filter: brightness(1.6);
+    box-shadow: 0 0 22px rgba(0, 255, 170, 0.55);
+  }
+  30% {
+    opacity: 0.45;
+    filter: brightness(0.7);
+  }
+  40% {
+    opacity: 1;
+    filter: brightness(1.15);
+    box-shadow: 0 0 18px rgba(0, 255, 170, 0.4);
+  }
+  70% {
+    opacity: 1;
+    filter: brightness(1);
+    box-shadow: 0 0 14px rgba(0, 255, 170, 0.3);
+  }
+  82% {
+    opacity: 0.55;
+    filter: brightness(0.85);
+  }
+  90% {
+    opacity: 0.9;
+    filter: brightness(1.1);
+  }
+  100% {
+    opacity: 0.35;
+    filter: brightness(0.7);
+    box-shadow: 0 0 6px rgba(0, 255, 170, 0.15);
+  }
+}
+
+@keyframes place-status-flash {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  15% {
+    opacity: 1;
+    filter: brightness(2);
+    text-shadow: 0 0 12px rgba(0, 255, 170, 0.85);
+  }
+  25% {
+    opacity: 0.15;
+  }
+  40% {
+    opacity: 1;
+    filter: brightness(1.3);
+  }
+  55% {
+    opacity: 0.5;
+  }
+  70% {
+    opacity: 1;
+    filter: brightness(1);
+    text-shadow: none;
+  }
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+.place-status {
+  text-align: center;
+  padding-bottom: 0.35rem;
+  pointer-events: none;
+}
+
+.place-kind {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--phos);
+}
+
+.place-reason {
+  margin: 0.2rem 0 0;
+  font-family: var(--font-crt);
+  font-size: 14px;
+  color: rgba(0, 255, 170, 0.75);
+}
+
+.place-reason.ok {
+  color: var(--phos);
+}
+
+.place-reason.bad {
+  color: #ff6b7a;
+}
+
+.hud-top.place-dim .advisor-wrap {
+  opacity: 0;
+  pointer-events: none;
+}

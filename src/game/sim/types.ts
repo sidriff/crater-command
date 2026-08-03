@@ -3,15 +3,43 @@ export type PlayerId = 0 | 1;
 export type BuildingKind =
   | "core"
   | "extractor"
+  | "depot"
+  | "refinery"
+  | "dome"
+  | "command"
   | "barracks"
   | "turret"
   | "aa"
   | "factory"
   | "airpad"
-  | "scout";
+  | "scout"
+  | "logistics"
+  | "em_array"
+  | "strike_dock"
+  | "null_lattice"
+  | "bomber_works"
+  | "capacitor"
+  | "artillery";
+
 export type UnitKind = "worker" | "raider" | "tank" | "flyer" | "scout";
+/** Coarse role for ops targeting / UI */
+export type UnitRole = "worker" | "light" | "heavy" | "air";
 export type StratTag = "rush" | "defend" | "expand" | "scout" | "eco";
 export type ProjectileStyle = "laser" | "bolt" | "shell" | "mine";
+
+export type { CardId, OpKind } from "./deck";
+
+export interface ActiveOp {
+  id: number;
+  owner: PlayerId;
+  cardId: string;
+  kind: import("./deck").OpKind;
+  x: number;
+  y: number;
+  radius: number;
+  assigneeId: number | null;
+  born: number;
+}
 
 export interface RaceDef {
   id: RaceId;
@@ -33,6 +61,8 @@ export interface BuildingDef {
   produces?: UnitKind;
   produceTime?: number;
   produceCost?: number;
+  /** Max live units this building contributes (default 1). */
+  produceSeats?: number;
   attackGround?: number;
   attackAir?: number;
   range?: number;
@@ -42,6 +72,8 @@ export interface BuildingDef {
 export interface UnitDef {
   kind: UnitKind;
   name: string;
+  /** Targeting / op filter class */
+  role: UnitRole;
   hp: number;
   speed: number;
   vision: number;
@@ -68,6 +100,8 @@ export interface Building {
   produceTimer: number;
   attackTimer: number;
   linkedMineralId: number | null;
+  fromCard: string | null;
+  isTech: boolean;
 }
 
 export interface Unit {
@@ -82,12 +116,12 @@ export interface Unit {
   targetIsBuilding: boolean;
   attackTimer: number;
   buildTargetId: number | null;
-  /** Crystal field this worker is mining */
   mineMineralId: number | null;
-  /** True while hauling a load back to drop-off */
   carrying: boolean;
-  /** 0–1 channel progress while harvesting at a crystal */
+  cargo: number;
   mineProgress: number;
+  exploreX: number | null;
+  exploreY: number | null;
 }
 
 export interface Projectile {
@@ -101,7 +135,6 @@ export interface Projectile {
   ty: number;
   targetId: number;
   targetIsBuilding: boolean;
-  /** Mining beam aims at a mineral id (targetIsBuilding false + mine style) */
   targetIsMineral: boolean;
   damage: number;
   speed: number;
@@ -117,17 +150,39 @@ export interface Mineral {
   x: number;
   y: number;
   yield: number;
+  maxYield: number;
+}
+
+export interface FloatEvent {
+  id: number;
+  x: number;
+  y: number;
+  owner: PlayerId;
+  amount: number;
+  born: number;
+  elev?: number;
 }
 
 export interface PlayerState {
   id: PlayerId;
   race: RaceId;
   energy: number;
+  energyMax: number;
   income: number;
   alive: boolean;
   workerCap: number;
+  capMax: number;
   vision: Uint8Array;
+  hand: string[];
+  /** Clash-style queue: next card shown under energy, not playable yet */
+  next: string | null;
+  draw: string[];
+  discard: string[];
+  /** Tech kinds already placed (first place triggers reshuffle) */
+  techsPlaced: string[];
+  visitT: Float32Array;
 }
+
 
 export type GamePhase = "playing" | "overtime" | "ended";
 
@@ -142,9 +197,28 @@ export interface SimSnapshot {
   units: Unit[];
   minerals: Mineral[];
   projectiles: Projectile[];
+  floaters: FloatEvent[];
   messages: string[];
+  /** Active operations — visible as radio marks even in FOW */
+  ops: ActiveOp[];
 }
 
 export type Intent =
-  | { type: "place"; player: PlayerId; kind: BuildingKind; x: number; y: number }
+  | {
+      type: "place";
+      player: PlayerId;
+      kind: BuildingKind;
+      x: number;
+      y: number;
+      handIndex: number;
+    }
+  | {
+      type: "castOp";
+      player: PlayerId;
+      handIndex: number;
+      x: number;
+      y: number;
+    }
+  | { type: "trash"; player: PlayerId; handIndex: number }
   | { type: "noop" };
+
