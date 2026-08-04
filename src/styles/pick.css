@@ -108,6 +108,88 @@
   pointer-events: none;
 }
 
+/* Brief VHS snow on video loop cut — hidden until .is-on */
+.fc-loop-static {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #020604;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 35ms linear;
+}
+
+.fc-loop-static.is-on {
+  opacity: 1;
+  transition: none;
+  animation: loop-static-hit 0.14s steps(2) both;
+}
+
+.fc-loop-static .fc-static-grain {
+  opacity: 0.9;
+  filter: contrast(1.7) brightness(1.25);
+}
+
+.fc-loop-static .fc-static-snow {
+  opacity: 0.55;
+}
+
+/* Horizontal tear / tracking bar during the hit */
+.fc-loop-tear {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  height: 18%;
+  top: 38%;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(0, 255, 170, 0.12) 35%,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(0, 255, 170, 0.08) 65%,
+    transparent
+  );
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: skewX(-8deg) scaleY(0.4);
+}
+
+.fc-loop-static.is-on .fc-loop-tear {
+  opacity: 0.95;
+  animation: loop-tear 0.12s steps(3) both;
+}
+
+@keyframes loop-static-hit {
+  0% {
+    filter: brightness(1.8) contrast(1.4) hue-rotate(-8deg);
+    transform: scaleY(1.02) translateX(0);
+  }
+  40% {
+    filter: brightness(0.7) contrast(1.8) hue-rotate(12deg);
+    transform: scaleY(0.97) translateX(-1.5%);
+  }
+  100% {
+    filter: brightness(1.1) contrast(1.2);
+    transform: none;
+  }
+}
+
+@keyframes loop-tear {
+  0% {
+    top: 12%;
+    transform: skewX(-12deg) scaleY(0.25);
+  }
+  50% {
+    top: 55%;
+    transform: skewX(6deg) scaleY(1.1);
+  }
+  100% {
+    top: 78%;
+    transform: skewX(-4deg) scaleY(0.35);
+  }
+}
+
 .fc-scan {
   position: absolute;
   inset: 0;

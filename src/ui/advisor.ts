@@ -22,8 +22,8 @@ type Skin = {
 
 const SKINS: Record<RaceId | "default", Skin> = {
   default: {
-    video: "/advisor/overlord.mp4?v=2",
-    poster: "/advisor/overlord.jpg",
+    video: "/advisor/blight.mp4?v=1",
+    poster: "/advisor/blight.jpg?v=1",
     label: "OVERLORD // LINK",
     accent: "#ff2a2a",
     border: "rgba(255,42,42,0.35)",
@@ -33,8 +33,8 @@ const SKINS: Record<RaceId | "default", Skin> = {
     pulse: "#ff2a2a",
   },
   blight: {
-    video: "/advisor/overlord.mp4?v=2",
-    poster: "/advisor/overlord.jpg",
+    video: "/advisor/blight.mp4?v=1",
+    poster: "/advisor/blight.jpg?v=1",
     label: "OVERLORD // HATCH",
     accent: "#ff2a2a",
     border: "rgba(255,42,42,0.4)",
@@ -55,8 +55,8 @@ const SKINS: Record<RaceId | "default", Skin> = {
     pulse: "#3d9bff",
   },
   operators: {
-    video: "/advisor/operators.mp4?v=2",
-    poster: "/advisor/operators.jpg",
+    video: "/advisor/operators.mp4?v=3",
+    poster: "/advisor/operators.jpg?v=3",
     label: "OPS // OPEN CHANNEL",
     accent: "#2dff8c",
     border: "rgba(45,255,140,0.4)",

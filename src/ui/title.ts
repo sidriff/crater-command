@@ -32,19 +32,19 @@ const ADVISORS: Record<
   { video: string; poster: string; call: string; line: string }
 > = {
   operators: {
-    video: "/advisor/operators.mp4?v=2",
-    poster: "/advisor/operators.jpg",
+    video: "/advisor/operators_idle.mp4?v=1",
+    poster: "/advisor/operators.jpg?v=3",
     call: "OPS // OPEN CHANNEL",
     line: "Stay light. Hit first.",
   },
   blight: {
-    video: "/advisor/overlord.mp4?v=2",
-    poster: "/advisor/overlord.jpg",
+    video: "/advisor/blight_idle.mp4?v=1",
+    poster: "/advisor/blight.jpg?v=1",
     call: "OVERLORD // HATCH",
     line: "Expand. Feed. Spread.",
   },
   mandate: {
-    video: "/advisor/mandate.mp4?v=2",
+    video: "/advisor/mandate_idle.mp4?v=1",
     poster: "/advisor/mandate.jpg",
     call: "MANDATE // COMMAND",
     line: "Fortify. Bank. Erase.",
@@ -84,6 +84,54 @@ function typeSlot(full: string, id: string, cursorClass: string): string {
   return `<span class="crt-type-slot" data-full="${full}"><span class="crt-type-live"><span class="crt-type-fill" id="${id}"></span><span class="crt-cursor ${cursorClass}" aria-hidden="true"></span></span></span>`;
 }
 
+/** Jump into a random phase so same-length loops don't hard-reset in lockstep. */
+function desyncLoop(v: HTMLVideoElement) {
+  const seek = () => {
+    if (!Number.isFinite(v.duration) || v.duration <= 0) return;
+    try {
+      v.currentTime = Math.random() * v.duration;
+    } catch {
+      /* ignore seek-before-ready races */
+    }
+  };
+  if (v.readyState >= HTMLMediaElement.HAVE_METADATA) seek();
+  else v.addEventListener("loadedmetadata", seek, { once: true });
+}
+
+/**
+ * Manual loop with a short VHS static hit on the cut.
+ * Native `loop` seeks silently — we want the seam to read as a CRT glitch.
+ */
+function wireVhsLoop(v: HTMLVideoElement, staticEl: HTMLElement) {
+  v.loop = false;
+  let busy = false;
+
+  const burst = (holdMs: number) => {
+    staticEl.classList.add("is-on");
+    window.setTimeout(() => staticEl.classList.remove("is-on"), holdMs);
+  };
+
+  const restart = () => {
+    if (busy) return;
+    busy = true;
+    // 90–180ms of snow — long enough to hide the seek, short enough to stay lofi
+    const hold = 90 + Math.floor(Math.random() * 90);
+    burst(hold);
+    window.setTimeout(() => {
+      try {
+        v.currentTime = 0;
+      } catch {
+        /* ignore */
+      }
+      void v.play().catch(() => {});
+      busy = false;
+    }, Math.min(70, hold - 20));
+  };
+
+  v.addEventListener("ended", restart);
+  desyncLoop(v);
+}
+
 function factionCard(race: RaceId | "random", onPick: () => void, delayMs: number) {
   const isRandom = race === "random";
   const tint = isRandom ? "#00ffaa" : RACES[race].tint;
@@ -111,7 +159,14 @@ function factionCard(race: RaceId | "random", onPick: () => void, delayMs: numbe
                <div class="fc-static-scan"></div>
              </div>
              <span class="fc-q">???</span>`
-          : `<video src="${ADVISORS[race].video}" poster="${ADVISORS[race].poster}" autoplay muted loop playsinline preload="none"></video>
+          : `<video src="${ADVISORS[race].video}" poster="${ADVISORS[race].poster}" autoplay muted playsinline preload="metadata"></video>
+             <div class="fc-loop-static" aria-hidden="true">
+               <div class="fc-static-grain"></div>
+               <div class="fc-static-snow"></div>
+               <div class="fc-static-roll"></div>
+               <div class="fc-static-scan"></div>
+               <div class="fc-loop-tear"></div>
+             </div>
              <div class="fc-grad"></div>`
       }
       <div class="fc-call">${call}</div>
@@ -124,6 +179,9 @@ function factionCard(race: RaceId | "random", onPick: () => void, delayMs: numbe
       <p class="fc-line">${line}</p>
     </div>
   `;
+  const vid = btn.querySelector("video");
+  const loopStatic = btn.querySelector(".fc-loop-static") as HTMLElement | null;
+  if (vid && loopStatic) wireVhsLoop(vid, loopStatic);
   btn.addEventListener("click", onPick);
   return btn;
 }

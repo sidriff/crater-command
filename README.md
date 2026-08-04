@@ -36,3 +36,18 @@ npm run dev
 | Build | `bun run build` | `npm run build` |
 | Preview | `bun run preview` | `npm run preview` |
 | Typecheck | `bun run typecheck` | `npm run typecheck` |
+| Labs | `bun run lab` → :8090 | `npm run lab` → :8090 |
+
+## Labs
+
+Modular previews of the **real** match view (`PlanetView` + entity layer), not alternate art.
+
+```bash
+npm run lab   # http://localhost:8090
+```
+
+| Lab | What |
+|-----|------|
+| **Readability** | Blank globe + scenario boards (identity grid, contact, FOW edge, clutter). Scorecard / PNG / JSON for visual passes. |
+
+Shell + labs live under `labs/`. Game code is imported via `@game/*`.

@@ -21,6 +21,24 @@ export const PAN_MOM_MAX = 48;
 
 export const UNIT_SMOOTH = 14;
 
+/**
+ * Surface profile for globe mesh + entity placement.
+ * - `match`: crater bowls, noise height, strategic bias (live game).
+ * - `flat`: constant radius sphere, no height — labs / readability baseline.
+ */
+export type SurfaceProfile = "match" | "flat";
+
+let _surfaceProfile: SurfaceProfile = "match";
+
+export function getSurfaceProfile(): SurfaceProfile {
+  return _surfaceProfile;
+}
+
+/** Affects terrainHeight / mapToWorld / placeOnSurface. Call before warming geometry. */
+export function setSurfaceProfile(profile: SurfaceProfile) {
+  _surfaceProfile = profile;
+}
+
 function hash3(x: number, y: number, z: number) {
   const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
   return n - Math.floor(n);
@@ -54,6 +72,8 @@ function noise3(px: number, py: number, pz: number) {
 }
 
 export function terrainHeight(nx: number, ny: number, nz: number): number {
+  // Flat profile: perfect sphere — entities and mesh share constant radius.
+  if (_surfaceProfile === "flat") return 0;
   let h = 0;
   h += (noise3(nx * 1.05, ny * 1.05, nz * 1.05) * 2 - 1) * 0.05;
   h += (noise3(nx * 2.0 + 1.3, ny * 2.0, nz * 2.0) * 2 - 1) * 0.02;
@@ -201,7 +221,79 @@ async function buildPolyGlobeGeometry(): Promise<THREE.BufferGeometry> {
   return geo;
 }
 
-export function warmPlanetGeometry(): Promise<THREE.BufferGeometry> {
+/** Smooth sphere: no height displacement, no crater/pass coloring. FOW UVs still map. */
+async function buildFlatGlobeGeometry(): Promise<THREE.BufferGeometry> {
+  await yieldMain();
+  const geo = new THREE.IcosahedronGeometry(GLOBE_RADIUS, PLANET_DETAIL);
+  await yieldMain();
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+  const uvs = new Float32Array(pos.count * 2);
+  const base = new THREE.Color("#3a4a5c");
+  const tmp = new THREE.Color();
+  const a = new THREE.Vector3();
+  const BATCH = 2500;
+
+  for (let i = 0; i < pos.count; i++) {
+    a.fromBufferAttribute(pos, i).normalize();
+    pos.setXYZ(i, a.x * GLOBE_RADIUS, a.y * GLOBE_RADIUS, a.z * GLOBE_RADIUS);
+    const map = dirToMap(a.x, a.y, a.z);
+    uvs[i * 2] = map.x / MAP_W;
+    uvs[i * 2 + 1] = THREE.MathUtils.clamp(map.y / MAP_H, 0, 1);
+    // Subtle face grain only — no strategic crater paint
+    const faceHash = hash3(a.x * 2.1, a.y * 2.1, a.z * 2.1);
+    tmp.copy(base).offsetHSL(0, 0, (faceHash - 0.5) * 0.04);
+    colors[i * 3] = tmp.r;
+    colors[i * 3 + 1] = tmp.g;
+    colors[i * 3 + 2] = tmp.b;
+    if (i > 0 && i % BATCH === 0) await yieldMain();
+  }
+
+  pos.needsUpdate = true;
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  await yieldMain();
+  geo.computeVertexNormals();
+  await yieldMain();
+  return geo;
+}
+
+const PLANET_FLAT_MESH_REV = 1;
+let _flatGlobeGeo: THREE.BufferGeometry | null = null;
+let _flatGlobePromise: Promise<THREE.BufferGeometry> | null = null;
+let _flatGlobeRev = -1;
+
+export type WarmPlanetOpts = {
+  /** No craters / height — constant-radius lab sphere */
+  flat?: boolean;
+};
+
+export function warmPlanetGeometry(opts?: WarmPlanetOpts): Promise<THREE.BufferGeometry> {
+  if (opts?.flat) {
+    if (_flatGlobeGeo && _flatGlobeRev === PLANET_FLAT_MESH_REV) {
+      return Promise.resolve(_flatGlobeGeo);
+    }
+    if (_flatGlobePromise && _flatGlobeRev === PLANET_FLAT_MESH_REV) {
+      return _flatGlobePromise;
+    }
+    if (_flatGlobeGeo && _flatGlobeRev !== PLANET_FLAT_MESH_REV) {
+      _flatGlobeGeo.dispose();
+      _flatGlobeGeo = null;
+    }
+    _flatGlobeRev = PLANET_FLAT_MESH_REV;
+    _flatGlobePromise = buildFlatGlobeGeometry()
+      .then((g) => {
+        _flatGlobeGeo = g;
+        return g;
+      })
+      .catch((err) => {
+        _flatGlobePromise = null;
+        _flatGlobeRev = -1;
+        throw err;
+      });
+    return _flatGlobePromise;
+  }
+
   if (_globeGeo && _globeRev === PLANET_MESH_REV) return Promise.resolve(_globeGeo);
   if (_globePromise && _globeRev === PLANET_MESH_REV) return _globePromise;
   if (_globeGeo && _globeRev !== PLANET_MESH_REV) {
@@ -222,7 +314,10 @@ export function warmPlanetGeometry(): Promise<THREE.BufferGeometry> {
   return _globePromise;
 }
 
-export function isPlanetGeometryReady() {
+export function isPlanetGeometryReady(opts?: WarmPlanetOpts) {
+  if (opts?.flat) {
+    return _flatGlobeGeo != null && _flatGlobeRev === PLANET_FLAT_MESH_REV;
+  }
   return _globeGeo != null && _globeRev === PLANET_MESH_REV;
 }
 
@@ -608,23 +703,29 @@ export function makeUnitGeos() {
     { geo: box(0.5, 0.06, 0.18), y: 0.55, z: -0.35 },
   ]);
 
-  const rotor = () => new THREE.CylinderGeometry(0.22, 0.22, 0.04, 8);
+  // Drone (Ops scout) — vacuum/low-g recon drone. No rotors: nothing to bite
+  // in a hard vacuum. Station-keeps on canted cold-gas/RCS thruster bells,
+  // compact octagonal chassis, forward sensor-eye on a gimbal collar as the
+  // primary top-down ID mark, short perch skids for regolith touchdown.
+  const rcsBell = () => cone(0.085, 0.15, 6);
   const scout = mergeParts([
-    { geo: box(0.45, 0.16, 0.55), y: 0.55 },
-    { geo: box(0.22, 0.14, 0.28), y: 0.62, z: 0.15 },
-    { geo: sph(0.1), y: 0.55, z: 0.42 },
-    { geo: box(0.9, 0.06, 0.08), y: 0.55 },
-    { geo: box(0.08, 0.06, 0.9), y: 0.55 },
-    { geo: cyl(0.08, 0.08, 0.1, 5), x: 0.42, y: 0.58, z: 0.42 },
-    { geo: cyl(0.08, 0.08, 0.1, 5), x: -0.42, y: 0.58, z: 0.42 },
-    { geo: cyl(0.08, 0.08, 0.1, 5), x: 0.42, y: 0.58, z: -0.42 },
-    { geo: cyl(0.08, 0.08, 0.1, 5), x: -0.42, y: 0.58, z: -0.42 },
-    { geo: rotor(), x: 0.42, y: 0.66, z: 0.42 },
-    { geo: rotor(), x: -0.42, y: 0.66, z: 0.42 },
-    { geo: rotor(), x: 0.42, y: 0.66, z: -0.42 },
-    { geo: rotor(), x: -0.42, y: 0.66, z: -0.42 },
-    { geo: box(0.12, 0.06, 0.5), x: -0.18, y: 0.35 },
-    { geo: box(0.12, 0.06, 0.5), x: 0.18, y: 0.35 },
+    { geo: cyl(0.22, 0.25, 0.14, 8), y: 0.5 },
+    // forward sensor-eye, gimbal collar
+    { geo: cyl(0.09, 0.09, 0.05, 8), y: 0.52, z: 0.22 },
+    { geo: sph(0.1), y: 0.56, z: 0.28 },
+    // cross struts to the four RCS corners — short, not blade-length
+    { geo: box(0.62, 0.05, 0.06), y: 0.48 },
+    { geo: box(0.06, 0.05, 0.62), y: 0.48 },
+    // four canted RCS thruster bells, nozzle apex down + outward
+    { geo: rcsBell(), x: 0.31, y: 0.4, z: 0.31, rz: 0.4, rx: -0.4 },
+    { geo: rcsBell(), x: -0.31, y: 0.4, z: 0.31, rz: -0.4, rx: -0.4 },
+    { geo: rcsBell(), x: 0.31, y: 0.4, z: -0.31, rz: 0.4, rx: 0.4 },
+    { geo: rcsBell(), x: -0.31, y: 0.4, z: -0.31, rz: -0.4, rx: 0.4 },
+    // ventral perch skids (hop-and-settle, not rolling gear)
+    { geo: box(0.05, 0.16, 0.05), x: 0.18, y: 0.34 },
+    { geo: box(0.05, 0.16, 0.05), x: -0.18, y: 0.34 },
+    // off-axis comms whip
+    { geo: box(0.02, 0.22, 0.02), x: -0.12, y: 0.66, z: -0.06 },
   ]);
 
   const pip = sph(0.14);
@@ -801,11 +902,17 @@ export function makeBuildingGeos() {
   ]);
   const command = commandKit.solid;
 
+  // Scout Works (Drone hangar) — the only round footprint in the Ops kit,
+  // deliberately so its top-down silhouette can't be confused with the
+  // square-scaffold family. Iris hatch + asymmetric launch-rail arm.
   const scoutPadKit = kitFromSpecs([
-    { geo: box(1.1, 0.35, 1.1), y: 0.25 },
-    { geo: cyl(0.15, 0.2, 0.7, 5), y: 0.75 },
-    { geo: new THREE.SphereGeometry(0.4, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.55), y: 1.2 },
-    { geo: box(0.5, 0.12, 0.12), y: 0.7, x: 0.35 },
+    { geo: cyl(0.85, 0.9, 0.14, 10), y: 0.08 },
+    { geo: flatRing(0.55, 0.78, 10), y: 0.16 },
+    { geo: cyl(0.5, 0.5, 0.07, 10), y: 0.21 },
+    { geo: box(0.5, 0.1, 0.22), x: -0.75, y: 0.22, ry: -0.35 },
+    { geo: box(0.08, 0.35, 0.08), x: -1.05, y: 0.35, ry: -0.35 },
+    { geo: new THREE.IcosahedronGeometry(0.07, 0), x: -1.05, y: 0.55, ry: -0.35 },
+    { geo: cyl(0.06, 0.06, 0.18, 6), x: 0.35, y: 0.28, z: 0.35 },
   ]);
   const scoutPad = scoutPadKit.solid;
 

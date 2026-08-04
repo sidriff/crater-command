@@ -19,6 +19,7 @@ import {
   PAN_FRICTION,
   projectToSurface,
   scaffoldFootprint,
+  setSurfaceProfile,
   warmPlanetGeometry,
 } from "./planetMath";
 
@@ -32,6 +33,13 @@ export type PlanetViewOpts = {
   onGlobeReady?: () => void;
   /** Optional: live preview validity for HUD ✓ button */
   onPlacePreview?: (info: { ok: boolean; reason: string; x: number; y: number } | null) => void;
+  /** Labs: keep color buffer for canvas.toDataURL screenshots */
+  preserveDrawingBuffer?: boolean;
+  /**
+   * Labs: smooth sphere with no crater bowls or height noise.
+   * Entity placement uses the same flat radius so meshes sit on the rock.
+   */
+  flatTerrain?: boolean;
 };
 
 /**
@@ -56,6 +64,7 @@ export class PlanetView {
   private onPlace: (x: number, y: number) => void;
   private onGlobeReady?: () => void;
   private onPlacePreview?: PlanetViewOpts["onPlacePreview"];
+  private flatTerrain: boolean;
   private snap: SimSnapshot | null = null;
   private placeKind: BuildingKind | null = null;
   /** Operation targeting (survey etc) — no building ghost */
@@ -105,6 +114,9 @@ export class PlanetView {
     this.onPlace = opts.onPlace;
     this.onGlobeReady = opts.onGlobeReady;
     this.onPlacePreview = opts.onPlacePreview;
+    this.flatTerrain = !!opts.flatTerrain;
+    // Entity mapToWorld must match mesh profile for the life of this view.
+    setSurfaceProfile(this.flatTerrain ? "flat" : "match");
 
     const w = Math.max(1, this.container.clientWidth);
     const h = Math.max(1, this.container.clientHeight);
@@ -113,6 +125,7 @@ export class PlanetView {
       antialias: true,
       alpha: false,
       powerPreference: "high-performance",
+      preserveDrawingBuffer: !!opts.preserveDrawingBuffer,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(w, h, false);
@@ -177,8 +190,10 @@ export class PlanetView {
     this._ro = new ResizeObserver(() => this.onResize());
     this._ro.observe(this.container);
 
-    void warmPlanetGeometry().then((geo) => {
+    void warmPlanetGeometry({ flat: this.flatTerrain }).then((geo) => {
       if (this.disposed) return;
+      // Re-assert profile in case another view toggled it while we warmed.
+      setSurfaceProfile(this.flatTerrain ? "flat" : "match");
       this.setupGlobe(geo);
       // Ease camera from title-wide to tactical after rock is up
       this.distT = DEFAULT_DIST;
@@ -316,6 +331,39 @@ export class PlanetView {
   focusMap(x: number, y: number) {
     mapToWorld(x, y, this.focus);
     this.panMom.set(0, 0, 0);
+  }
+
+  /**
+   * Lab / debug camera targets. Values are radians (elev) and world units (dist).
+   * When `immediate` is true, current pose snaps with no ease.
+   */
+  setCameraTargets(opts: {
+    az?: number;
+    el?: number;
+    dist?: number;
+    immediate?: boolean;
+  }) {
+    if (opts.az != null) this.azT = opts.az;
+    if (opts.el != null) {
+      this.elT = THREE.MathUtils.clamp(opts.el, EL_MIN, EL_MAX);
+    }
+    if (opts.dist != null) {
+      this.distT = THREE.MathUtils.clamp(opts.dist, DIST_MIN, DIST_MAX);
+    }
+    if (opts.immediate) {
+      this.az = this.azT;
+      this.el = this.elT;
+      this.dist = this.distT;
+    }
+  }
+
+  getCameraTargets(): { az: number; el: number; dist: number } {
+    return { az: this.azT, el: this.elT, dist: this.distT };
+  }
+
+  /** Canvas for screenshot capture (labs / debug). */
+  getDomElement(): HTMLCanvasElement {
+    return this.renderer.domElement;
   }
 
   isPlaceValid(): boolean {
@@ -617,5 +665,7 @@ export class PlanetView {
         (v as THREE.BufferGeometry).dispose();
       }
     }
+    // Don't leave labs' flat profile stuck if play boots later in-process.
+    if (this.flatTerrain) setSurfaceProfile("match");
   }
 }

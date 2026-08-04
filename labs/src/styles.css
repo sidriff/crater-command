@@ -1,0 +1,319 @@
+/* Labs shell — phosphor operator chrome, no game HUD */
+
+:root {
+  --bg: #000814;
+  --surface: #04140e;
+  --surface-2: #0a2218;
+  --fg: #c8ffe8;
+  --muted: #5a9a7a;
+  --primary: #00ffaa;
+  --danger: #ff5533;
+  --warn: #ffcc66;
+  --border: #0d3a28;
+  --font-mono: "Space Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-crt: "VT323", "Space Mono", ui-monospace, monospace;
+  --font-display: "Turret Road", ui-sans-serif, system-ui, sans-serif;
+  --panel-w: 320px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #000;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 1fr var(--panel-w);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "top top"
+    "view side"
+    "stats side";
+}
+
+.lab-top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, #04140ecc, #000a08ee);
+  border-bottom: 1px solid var(--border);
+  z-index: 2;
+}
+
+.lab-brand {
+  font-family: var(--font-crt);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: var(--primary);
+  text-transform: uppercase;
+}
+
+.lab-brand span {
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+.lab-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.lab-pick {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.lab-pick:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.lab-pick.is-active {
+  color: #001208;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.lab-blurb {
+  margin-left: auto;
+  color: var(--muted);
+  max-width: 42ch;
+  text-align: right;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.lab-viewport {
+  grid-area: view;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  background: #02040a;
+}
+
+.lab-viewport canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.lab-side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #020a08f2;
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.lab-side-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 12px 16px;
+}
+
+.lab-stats {
+  grid-area: stats;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 6px 12px;
+  background: #000a08;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-crt);
+  font-size: 16px;
+  color: var(--muted);
+  z-index: 2;
+}
+
+.lab-stats b {
+  color: var(--primary);
+  font-weight: 400;
+  margin-right: 4px;
+}
+
+.lab-section-title {
+  font-family: var(--font-crt);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  color: var(--primary);
+  margin: 14px 0 8px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.lab-section-title:first-child {
+  margin-top: 0;
+}
+
+.lab-lever {
+  display: block;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.lab-lever-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.lab-lever-label {
+  color: var(--fg);
+}
+
+.lab-lever-val {
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-lever input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.lab-lever input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+}
+
+.lab-lever-trade {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.lab-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.lab-btn {
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+  background: var(--surface);
+  color: var(--primary);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.lab-btn:hover {
+  border-color: var(--primary);
+  background: var(--surface-2);
+}
+
+.lab-btn.is-active {
+  background: var(--primary);
+  color: #001208;
+  border-color: var(--primary);
+}
+
+.lab-score {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lab-score label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--fg);
+  line-height: 1.3;
+}
+
+.lab-score input {
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.lab-notes {
+  width: 100%;
+  min-height: 64px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #000;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+  resize: vertical;
+}
+
+.lab-export {
+  margin-top: 8px;
+  width: 100%;
+  max-height: 120px;
+  overflow: auto;
+  padding: 6px 8px;
+  background: #000;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lab-hint {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  margin: 0 0 8px;
+}
+
+@media (max-width: 900px) {
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto minmax(180px, 32vh);
+    grid-template-areas:
+      "top"
+      "view"
+      "stats"
+      "side";
+  }
+
+  .lab-side {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .lab-blurb {
+    display: none;
+  }
+}
