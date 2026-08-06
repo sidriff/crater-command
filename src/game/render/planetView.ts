@@ -6,6 +6,7 @@ import { PlanetEntityLayer } from "./planetEntities";
 import { attachFowShader, createFowState, updateFow, type FowState } from "./planetFow";
 import { bindPlanetInput } from "./planetInput";
 import { PlanetPlaceAssist } from "./planetPlaceAssist";
+import { makeBuildingGeos } from "./buildingGeos";
 import {
   DEFAULT_DIST,
   DIST_MAX,
@@ -13,7 +14,6 @@ import {
   EL_MAX,
   EL_MIN,
   isPlanetGeometryReady,
-  makeBuildingGeos,
   mapToWorld,
   placeOnSurface,
   PAN_FRICTION,
@@ -60,6 +60,9 @@ export class PlanetView {
   private ghostEdgeOwned: THREE.BufferGeometry | null = null;
   private placeGeos = makeBuildingGeos();
   private placeAssist: PlanetPlaceAssist;
+  /** Lab highlight ring on the surface (mesh↔readability focus). */
+  private markerGroup = new THREE.Group();
+  private markerGeo: THREE.BufferGeometry | null = null;
   private viewer: PlayerId;
   private onPlace: (x: number, y: number) => void;
   private onGlobeReady?: () => void;
@@ -183,6 +186,32 @@ export class PlanetView {
     this.ghostGroup.visible = false;
     this.scene.add(this.ghostGroup);
     this.placeAssist = new PlanetPlaceAssist(this.scene);
+
+    // Surface selection ring — labs call setSurfaceMarker (no built-in select).
+    this.markerGeo = new THREE.RingGeometry(0.48, 0.68, 40);
+    this.markerGeo.rotateX(-Math.PI / 2);
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: 0x2dff8c,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const markerFill = new THREE.Mesh(
+      new THREE.RingGeometry(0.05, 0.48, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0x2dff8c,
+        transparent: true,
+        opacity: 0.12,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    this.markerGroup.add(new THREE.Mesh(this.markerGeo, markerMat), markerFill);
+    this.markerGroup.visible = false;
+    this.scene.add(this.markerGroup);
 
     mapToWorld(START_P0.x, START_P0.y, this.focus);
     this.unbindInput = this.attachInput();
@@ -331,6 +360,19 @@ export class PlanetView {
   focusMap(x: number, y: number) {
     mapToWorld(x, y, this.focus);
     this.panMom.set(0, 0, 0);
+  }
+
+  /**
+   * Lab: draw a phosphor ring on the surface at map (x,y), or hide when null.
+   * Pair with focusMap + setCameraTargets to frame the selection.
+   */
+  setSurfaceMarker(x: number | null, y: number | null) {
+    if (x == null || y == null) {
+      this.markerGroup.visible = false;
+      return;
+    }
+    placeOnSurface(this.markerGroup, x, y, 0.04);
+    this.markerGroup.visible = true;
   }
 
   /**
@@ -659,6 +701,16 @@ export class PlanetView {
     (this.ghost.material as THREE.Material).dispose();
     (this.ghostWire.material as THREE.Material).dispose();
     this.ghostEdgeOwned?.dispose();
+    this.markerGroup.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.geometry?.dispose();
+        const mat = m.material;
+        if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+        else (mat as THREE.Material | undefined)?.dispose();
+      }
+    });
+    this.markerGeo = null;
     // placeGeos solids shared — dispose all buffer geos from the pack
     for (const v of Object.values(this.placeGeos)) {
       if (v && typeof (v as THREE.BufferGeometry).dispose === "function") {

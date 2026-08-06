@@ -15,7 +15,6 @@ export type CardId =
   | "ops_strike_dock"
   | "ops_null_lattice"
   | "ops_bomber_works"
-  | "ops_capacitor"
   | "ops_artillery"
   | "ops_interceptor"
   | "ops_airpad"
@@ -65,7 +64,10 @@ export const HAND_SIZE = 4;
 export const DRAW_INTERVAL = 0;
 export const ENERGY_MAX_BASE = 400;
 export const ENERGY_TICK = 100;
-export const CAPACITOR_ENERGY_BONUS = 100;
+/** Finished Ops refineries raise energy ceiling (merged former capacitor role). */
+export const REFINERY_ENERGY_BONUS = 100;
+/** @deprecated use REFINERY_ENERGY_BONUS — capacitor building retired from the deck */
+export const CAPACITOR_ENERGY_BONUS = REFINERY_ENERGY_BONUS;
 
 
 export const CARDS: Record<CardId, CardDef> = {
@@ -162,7 +164,7 @@ export const CARDS: Record<CardId, CardDef> = {
     cost: 150,
     tech: false,
     operation: false,
-    blurb: "Local mineral drop-off. +2 capacity.",
+    blurb: "Local mineral drop-off. +100 energy max while standing.",
   },
   // —— T2 Eco ——
   ops_logistics: {
@@ -173,19 +175,28 @@ export const CARDS: Record<CardId, CardDef> = {
     cost: 300,
     tech: true,
     operation: false,
-    blurb: "TECH T2 ECO. Convoy tempo. No T3 — efficiency is the apex.",
+    blurb: "TECH T2 ECO. Convoy tempo + artillery. No T3 — efficiency is the apex.",
     prereq: "command",
-    inject: ["ops_depot", "ops_depot", "ops_dome", "ops_capacitor", "ops_overdrive"],
+    // Extra refinery inject = energy bank (former capacitor role).
+    // Artillery lives on eco so siege doesn't require the air doctrine.
+    inject: [
+      "ops_depot",
+      "ops_depot",
+      "ops_dome",
+      "ops_refinery",
+      "ops_artillery",
+      "ops_overdrive",
+    ],
   },
-  ops_capacitor: {
-    id: "ops_capacitor",
-    name: "Capacitor",
-    short: "Cap",
-    building: "capacitor",
-    cost: 150,
+  ops_artillery: {
+    id: "ops_artillery",
+    name: "Artillery Pad",
+    short: "Arty",
+    building: "artillery",
+    cost: 200,
     tech: false,
     operation: false,
-    blurb: "+100 energy max while standing.",
+    blurb: "Long-range ground battery.",
     prereq: "logistics",
   },
   ops_overdrive: {
@@ -245,20 +256,9 @@ export const CARDS: Record<CardId, CardDef> = {
     cost: 300,
     tech: true,
     operation: false,
-    blurb: "TECH T2 AGGRO. Air and artillery. Unlocks Bomber Works.",
+    blurb: "TECH T2 AGGRO. Airpad (Interceptor) + Bay inject. Unlocks Bomber Works.",
     prereq: "command",
-    inject: ["ops_bay", "ops_artillery", "ops_airpad", "ops_intercept", "ops_bomber_works"],
-  },
-  ops_artillery: {
-    id: "ops_artillery",
-    name: "Artillery Pad",
-    short: "Arty",
-    building: "artillery",
-    cost: 200,
-    tech: false,
-    operation: false,
-    blurb: "Long-range ground battery.",
-    prereq: "strike_dock",
+    inject: ["ops_bay", "ops_airpad", "ops_intercept", "ops_bomber_works"],
   },
   ops_airpad: {
     id: "ops_airpad",
@@ -268,7 +268,7 @@ export const CARDS: Record<CardId, CardDef> = {
     cost: 200,
     tech: false,
     operation: false,
-    blurb: "VTOL fighters.",
+    blurb: "Trains Interceptors · VTOL air + ground.",
     prereq: "strike_dock",
   },
   ops_intercept: {
@@ -312,12 +312,12 @@ export const CARDS: Record<CardId, CardDef> = {
   ops_bomber_works: {
     id: "ops_bomber_works",
     name: "Bomber Works",
-    short: "Bomber",
+    short: "BWorks",
     building: "bomber_works",
     cost: 400,
     tech: true,
     operation: false,
-    blurb: "TECH T3 AGGRO. One flyer seat per Works. Death refill. Cluster for squads.",
+    blurb: "TECH T3 AGGRO. One Bomber seat per Works. Death refill. Cluster for wings.",
     prereq: "strike_dock",
     inject: ["ops_bomb_run"],
   },
@@ -331,7 +331,7 @@ export const CARDS: Record<CardId, CardDef> = {
     operation: true,
     opKind: "bomb_run",
     opRadius: 1.6,
-    blurb: "OPERATION. Direct an air unit to the mark.",
+    blurb: "OPERATION. Direct a Bomber (or other air unit) to the mark.",
   },
 
   // —— Blight (stub) ——

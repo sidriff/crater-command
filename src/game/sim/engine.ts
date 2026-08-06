@@ -11,7 +11,7 @@ import {
   MAP_W,
   MATCH_SECONDS,
   MINE_TRIP_YIELD,
-  REFINERY_CAP,
+
   START_ENERGY,
   START_WORKERS,
   TICK_DT,
@@ -37,7 +37,7 @@ import {
 } from "./path";
 import { fireProjectile, tickCombat, tickProjectiles } from "./combat";
 import {
-  CAPACITOR_ENERGY_BONUS,
+  REFINERY_ENERGY_BONUS,
   CARDS,
   ENERGY_MAX_BASE,
   HAND_SIZE,
@@ -336,7 +336,8 @@ export class GameSim {
 
   spawnUnit(owner: PlayerId, kind: UnitKind, x: number, y: number) {
     const def = UNITS[kind];
-    const walk = nearestWalkable(x, y, 4) ?? { x, y };
+    // Air units (scouts, flyers) spawn exactly where asked — no ground snap off the pad.
+    const walk = def.air ? { x, y } : nearestWalkable(x, y, 4) ?? { x, y };
     this.units.push({
       id: allocId(),
       owner,
@@ -629,22 +630,21 @@ export class GameSim {
     this.refreshCapacity();
   }
 
-  /** Rebuild capMax from cores + race supply buildings. Also energyMax from capacitors. */
+  /** Rebuild capMax from cores + supply buildings. energyMax from Ops refineries. */
   refreshCapacity() {
     for (const p of this.players) {
       let cap = 0;
-      let caps = 0;
+      let refineries = 0;
       for (const b of this.buildings) {
         if (b.owner !== p.id || !b.done) continue;
         if (b.kind === "core") cap += CORE_CAP;
         else if (b.kind === "dome") cap += DOME_CAP;
-        else if (b.kind === "refinery") cap += REFINERY_CAP;
+        else if (b.kind === "refinery") refineries += 1;
         else if (b.kind === "extractor" && p.race !== "operators") cap += EXTRACTOR_CAP_BONUS;
-        else if (b.kind === "capacitor") caps += 1;
       }
       p.capMax = Math.max(0, cap);
       p.workerCap = p.capMax;
-      p.energyMax = ENERGY_MAX_BASE + caps * CAPACITOR_ENERGY_BONUS;
+      p.energyMax = ENERGY_MAX_BASE + refineries * REFINERY_ENERGY_BONUS;
     }
   }
 

@@ -1,5 +1,6 @@
 import { BUILDINGS, MAP_H, MAP_W, UNITS, raceUnitMul } from "./defs";
 import type { CardId } from "./deck";
+import { scoutPatrolPoint } from "./movement";
 import type { GroundPath } from "./path";
 import type {
   Building,
@@ -20,6 +21,7 @@ import {
 } from "./util";
 
 export type CombatHost = {
+  t: number;
   units: Unit[];
   buildings: Building[];
   minerals: Mineral[];
@@ -140,6 +142,83 @@ function acquireTarget(
   return best;
 }
 
+/**
+ * Scout path laser: only pick enemies sitting on the flight corridor ahead —
+ * positive along-track distance within range, small cross-track offset.
+ * Does not set chase goals; movement keeps patrolling regardless of targetId.
+ */
+function acquireScoutPathTarget(
+  sim: CombatHost,
+  u: Unit,
+): { id: number; x: number; y: number; isBuilding: boolean } | null {
+  const def = UNITS.scout;
+  const goal = scoutPatrolPoint(sim, u);
+  let hx = goal.x - u.x;
+  if (hx > MAP_W / 2) hx -= MAP_W;
+  if (hx < -MAP_W / 2) hx += MAP_W;
+  let hy = goal.y - u.y;
+  let hLen = Math.hypot(hx, hy);
+  // Near a waypoint the patrol heading collapses — fall back to "toward enemy core"
+  // so the laser still has a forward while loitering.
+  if (hLen < 0.45) {
+    const enemyCore = sim.buildings.find((b) => b.owner !== u.owner && b.kind === "core");
+    if (enemyCore) {
+      hx = enemyCore.x - u.x;
+      if (hx > MAP_W / 2) hx -= MAP_W;
+      if (hx < -MAP_W / 2) hx += MAP_W;
+      hy = enemyCore.y - u.y;
+      hLen = Math.hypot(hx, hy);
+    }
+  }
+  if (hLen < 1e-4) {
+    hx = 1;
+    hy = 0;
+    hLen = 1;
+  }
+  hx /= hLen;
+  hy /= hLen;
+
+  const range = def.range;
+  /** Half-width of the fire corridor (map units). */
+  const halfW = 0.95;
+  let best: { id: number; x: number; y: number; isBuilding: boolean } | null = null;
+  let bestScore = 1e9;
+
+  const consider = (id: number, x: number, y: number, isBuilding: boolean, air: boolean) => {
+    if (air && !def.attackAir) return;
+    if (!air && !def.attackGround) return;
+    let ex = x - u.x;
+    if (ex > MAP_W / 2) ex -= MAP_W;
+    if (ex < -MAP_W / 2) ex += MAP_W;
+    const ey = y - u.y;
+    const d = Math.hypot(ex, ey);
+    if (d > range || d < 0.12) return;
+    const along = ex * hx + ey * hy;
+    // Must be ahead (small rear allowance for near-misses while banking)
+    if (along < -0.15) return;
+    const cross = Math.abs(ex * hy - ey * hx);
+    if (cross > halfW) return;
+    // Prefer near-centerline and closer
+    const score = d + cross * 1.4;
+    if (score < bestScore) {
+      bestScore = score;
+      best = { id, x, y, isBuilding };
+    }
+  };
+
+  for (const ou of sim.units) {
+    if (ou.owner === u.owner) continue;
+    consider(ou.id, ou.x, ou.y, false, UNITS[ou.kind].air);
+  }
+  if (def.attackGround) {
+    for (const b of sim.buildings) {
+      if (b.owner === u.owner) continue;
+      consider(b.id, b.x, b.y, true, false);
+    }
+  }
+  return best;
+}
+
 export function tickCombat(sim: CombatHost, dt: number) {
   for (const b of sim.buildings) {
     if (!b.done) continue;
@@ -192,13 +271,46 @@ export function tickCombat(sim: CombatHost, dt: number) {
 
   for (const u of sim.units) {
     if (u.kind === "worker") continue;
-    if (u.kind === "scout") {
-      u.targetId = null;
-      u.targetIsBuilding = false;
-      continue;
-    }
     const def = UNITS[u.kind];
     u.attackTimer -= dt;
+
+    // Scout: light path laser only — engage corridor targets, never chase.
+    if (u.kind === "scout") {
+      const tgt = acquireScoutPathTarget(sim, u);
+      if (!tgt) {
+        u.targetId = null;
+        u.targetIsBuilding = false;
+        continue;
+      }
+      // targetId is fire-lock only; movement always ignores it for scouts
+      u.targetId = tgt.id;
+      u.targetIsBuilding = tgt.isBuilding;
+      if (u.attackTimer > 0) continue;
+      const mul = raceUnitMul(sim.players[u.owner]!.race, u.kind).dmg;
+      const toAir = tgt.isBuilding
+        ? 0.4
+        : UNITS[sim.units.find((x) => x.id === tgt.id)?.kind ?? "raider"]?.air
+          ? 1
+          : 0.15;
+      fireProjectile(
+        sim,
+        u.owner,
+        u.x,
+        u.y,
+        tgt.x,
+        tgt.y,
+        tgt.id,
+        tgt.isBuilding,
+        def.damage * mul,
+        unitShotStyle(u.kind),
+        // >1 lifts the muzzle toward scout cruise altitude in beam render
+        1.5,
+        toAir,
+      );
+      u.attackTimer = def.dpsInterval;
+      continue;
+    }
+
     const tgt = acquireTarget(sim, u);
     if (!tgt) {
       u.targetId = null;

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { DEFAULT_DIST } from "@game/render/planetMath";
 import { PlanetView } from "@game/render/planetView";
 import type { RaceId } from "@game/sim/types";
+import { copyText, flashButton } from "../../copy";
 import type { Lab, LabContext } from "../../lab";
 import type { LeverDef } from "../../levers";
 import { BOARDS, type BoardId, boardById, buildBoard } from "./boards";
@@ -57,7 +58,7 @@ const LEVERS: LeverDef[] = [
     max: 2,
     step: 1,
     section: "Board",
-    tradesAgainst: "0 Ops · 1 Blight · 2 Mandate — same board, different tints/meshes.",
+    tradesAgainst: "0 Operators · 1 Blight · 2 Mandate — same board, different tints/meshes.",
   },
 ];
 
@@ -232,10 +233,12 @@ export function makeReadabilityLab(): Lab {
     copy.addEventListener("click", async () => {
       writeExport(ctx);
       if (!exportEl) return;
-      try {
-        await navigator.clipboard.writeText(exportEl.textContent ?? "");
+      const ok = await copyText(exportEl.textContent ?? "");
+      if (ok) {
+        flashButton(copy, "Copied!");
         ctx.stat("export", "copied");
-      } catch {
+      } else {
+        flashButton(copy, "Select + copy");
         ctx.stat("export", "select+copy");
       }
     });
@@ -247,24 +250,61 @@ export function makeReadabilityLab(): Lab {
     secScore.textContent = "Scorecard";
     uiRoot.appendChild(secScore);
 
+    const scoreHint = document.createElement("p");
+    scoreHint.className = "lab-hint";
+    scoreHint.textContent =
+      "Human pass marks for this board — not view filters. Ticked rows ship in the JSON export.";
+    uiRoot.appendChild(scoreHint);
+
+    const scoreMeta = document.createElement("div");
+    scoreMeta.className = "lab-score-meta";
+    uiRoot.appendChild(scoreMeta);
+
     const scoreBox = document.createElement("div");
     scoreBox.className = "lab-score";
+
+    const refreshScoreMeta = () => {
+      const n = SCORE_KEYS.length;
+      const pass = SCORE_KEYS.reduce((a, s) => a + (scores[s.id] ? 1 : 0), 0);
+      scoreMeta.textContent = `PASS ${pass} / ${n}`;
+      scoreMeta.classList.toggle("is-all", pass === n && n > 0);
+      ctx.stat("score", `${pass}/${n}`);
+      scoreBox.querySelectorAll<HTMLLabelElement>("label[data-score]").forEach((lab) => {
+        const id = lab.dataset.score!;
+        lab.classList.toggle("is-pass", !!scores[id]);
+      });
+    };
+
     for (const s of SCORE_KEYS) {
       const lab = document.createElement("label");
+      lab.dataset.score = s.id;
+      lab.classList.toggle("is-pass", !!scores[s.id]);
+
       const cb = document.createElement("input");
       cb.type = "checkbox";
+      cb.id = `score-${s.id}`;
       cb.checked = !!scores[s.id];
       cb.addEventListener("change", () => {
         scores[s.id] = cb.checked;
+        lab.classList.toggle("is-pass", cb.checked);
+        refreshScoreMeta();
         saveState(boardId, scores, notes);
         writeExport(ctx);
       });
+
+      const mark = document.createElement("span");
+      mark.className = "lab-score-mark";
+      mark.setAttribute("aria-hidden", "true");
+
       const span = document.createElement("span");
+      span.className = "lab-score-text";
       span.textContent = s.label;
-      lab.append(cb, span);
+
+      lab.append(cb, mark, span);
       scoreBox.appendChild(lab);
     }
     uiRoot.appendChild(scoreBox);
+    refreshScoreMeta();
 
     const notesEl = document.createElement("textarea");
     notesEl.className = "lab-notes";

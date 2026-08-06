@@ -57,7 +57,7 @@ const SKINS: Record<RaceId | "default", Skin> = {
   operators: {
     video: "/advisor/operators.mp4?v=3",
     poster: "/advisor/operators.jpg?v=3",
-    label: "OPS // OPEN CHANNEL",
+    label: "OPERATORS // OPEN CHANNEL",
     accent: "#2dff8c",
     border: "rgba(45,255,140,0.4)",
     glow: "rgba(45,255,140,0.18)",
@@ -72,7 +72,7 @@ export const ADVISOR_LINES = {
     "Asteroid secure. Expand the claim, seed extractors, and crush the opposition. No mercy on the belt.",
   matchStartMandate:
     "Charter acknowledges claim. Fortify the perimeter, bank the yield, and erase unauthorized operations. By authority of the Surface Mandate.",
-  matchStartOps:
+  matchStartOperators:
     "Belt crew online. Grab crystals early, stay light, hit them before the paper-pushers dig in. Make it messy.",
 } as const;
 

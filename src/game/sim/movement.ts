@@ -14,7 +14,14 @@ export type MovementHost = {
   moveGroundUnit: (u: Unit, tx: number, ty: number, speed: number, dt: number) => void;
 };
 
-function scoutPatrolPoint(sim: MovementHost, u: Unit): { x: number; y: number } {
+/** Minimal host for patrol heading (movement + combat path lasers). */
+export type ScoutNavHost = {
+  t: number;
+  buildings: Building[];
+};
+
+/** Shared with combat so path-lasers use the same heading the patrol flies. */
+export function scoutPatrolPoint(sim: ScoutNavHost, u: Unit): { x: number; y: number } {
   const enemyCore = sim.buildings.find((b) => b.owner !== u.owner && b.kind === "core");
   const home = sim.buildings.find((b) => b.owner === u.owner && b.kind === "core");
   const period = 7.5;

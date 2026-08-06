@@ -21,7 +21,14 @@ export type BuildingKind =
   | "capacitor"
   | "artillery";
 
-export type UnitKind = "worker" | "raider" | "tank" | "flyer" | "scout";
+export type UnitKind =
+  | "worker"
+  | "raider"
+  | "tank"
+  | "flyer"
+  | "interceptor"
+  | "bomber"
+  | "scout";
 /** Coarse role for ops targeting / UI */
 export type UnitRole = "worker" | "light" | "heavy" | "air";
 export type StratTag = "rush" | "defend" | "expand" | "scout" | "eco";

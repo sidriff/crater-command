@@ -1,5 +1,7 @@
 import type { BuildingDef, BuildingKind, RaceDef, RaceId, UnitDef, UnitKind } from "./types";
 
+// Faction identity/lore: see LORE.md (Orbital Operators = anti-automation
+// space libertarians, drone pilots — fastest vehicles, strongest air power).
 export const RACES: Record<RaceId, RaceDef> = {
   operators: {
     id: "operators",
@@ -65,7 +67,11 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     produceTime: 5.5,
     produceCost: 0,
   },
-  /** Ops: mineral drop-off (plus core). No crystal link required. */
+  /**
+   * Ops: mineral drop-off (plus core) and energy bank.
+   * Each finished refinery raises energyMax by REFINERY_ENERGY_BONUS.
+   * No crystal link required. No capacity grant — that is Core / Dome.
+   */
   refinery: {
     kind: "refinery",
     name: "Refinery",
@@ -160,6 +166,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     vision: 4,
     tag: "rush",
     placeable: true,
+    /** Default product (Mandate etc.). Operators override to interceptor — see unitProducedBy. */
     produces: "flyer",
     produceTime: 9,
     produceCost: 50,
@@ -174,7 +181,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     tag: "scout",
     placeable: true,
     produces: "scout",
-    produceTime: 6,
+    // Product is the drone CRT-assembled on the pad — fling it as soon as
+    // seat + cap allow (no separate factory queue after the building resolves).
+    produceTime: 0,
     produceCost: 20,
   },
   logistics: {
@@ -226,10 +235,14 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     vision: 5,
     tag: "rush",
     placeable: true,
-    produces: "flyer",
+    produces: "bomber",
     produceTime: 12,
     produceCost: 60,
   },
+  /**
+   * Retired Ops energy bank — role merged into refinery.
+   * Kind kept so old saves / mesh aliases don't break; not placeable.
+   */
   capacitor: {
     kind: "capacitor",
     name: "Capacitor",
@@ -238,7 +251,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     hp: 200,
     vision: 3.5,
     tag: "eco",
-    placeable: true,
+    placeable: false,
   },
   artillery: {
     kind: "artillery",
@@ -299,6 +312,7 @@ export const UNITS: Record<UnitKind, UnitDef> = {
     attackGround: true,
     dpsInterval: 0.85,
   },
+  /** Shared / non-Ops combat air (Mandate pad, etc.). */
   flyer: {
     kind: "flyer",
     name: "Flyer",
@@ -313,6 +327,36 @@ export const UNITS: Record<UnitKind, UnitDef> = {
     attackGround: true,
     dpsInterval: 0.65,
   },
+  /** Ops T2 Airpad product — VTOL interceptor, air + ground. */
+  interceptor: {
+    kind: "interceptor",
+    name: "Interceptor",
+    role: "air",
+    hp: 95,
+    speed: 0.45,
+    vision: 4.5,
+    air: true,
+    damage: 14,
+    range: 2.2,
+    attackAir: true,
+    attackGround: true,
+    dpsInterval: 0.62,
+  },
+  /** Ops T3 Bomber Works product — heavy ground strike, weaker AA. */
+  bomber: {
+    kind: "bomber",
+    name: "Bomber",
+    role: "air",
+    hp: 140,
+    speed: 0.32,
+    vision: 4.2,
+    air: true,
+    damage: 28,
+    range: 2.6,
+    attackAir: true,
+    attackGround: true,
+    dpsInterval: 0.9,
+  },
   scout: {
     kind: "scout",
     name: "Drone",
@@ -321,11 +365,12 @@ export const UNITS: Record<UnitKind, UnitDef> = {
     speed: 0.59,
     vision: 7.5,
     air: true,
-    damage: 0,
-    range: 0.1,
-    attackAir: false,
-    attackGround: false,
-    dpsInterval: 99,
+    // Light path laser — harass only; combat does not divert patrol
+    damage: 5,
+    range: 2.35,
+    attackAir: true,
+    attackGround: true,
+    dpsInterval: 0.72,
   },
 };
 
@@ -342,8 +387,8 @@ export const CORE_CAP = 5;
 export const DOME_CAP = 3;
 /** Temporary: non-Ops extractors also add capacity until those races get supply buildings. */
 export const EXTRACTOR_CAP_BONUS = 2;
-/** Ops refinery capacity grant */
-export const REFINERY_CAP = 2;
+/** @deprecated refinery no longer grants capacity — energy only (see REFINERY_ENERGY_BONUS) */
+export const REFINERY_CAP = 0;
 
 /** @deprecated worker-only cap; production now uses capacity */
 export const CORE_WORKER_CAP = 3;
@@ -379,7 +424,6 @@ export function placeableForRace(race: RaceId): BuildingKind[] {
     "strike_dock",
     "null_lattice",
     "bomber_works",
-    "capacitor",
     "artillery",
   ];
   return PLACEABLE.filter((k) => {
@@ -389,10 +433,31 @@ export function placeableForRace(race: RaceId): BuildingKind[] {
 }
 
 
+/**
+ * What a finished building trains for this race.
+ *
+ * Factions are asymmetric long-term (no shared unit/building kit). Race
+ * branches here are transitional while some BuildingKinds are still shared
+ * across decks (e.g. airpad). Prefer faction-owned kinds over new overrides.
+ */
+export function unitProducedBy(
+  buildingKind: BuildingKind,
+  race: RaceId,
+): UnitKind | undefined {
+  const base = BUILDINGS[buildingKind]?.produces;
+  if (!base) return undefined;
+  // Ops Airpad → Interceptor (not the shared Flyer). Mandate keeps Flyer.
+  if (race === "operators" && buildingKind === "airpad") return "interceptor";
+  // Bomber Works is Ops-only; product is Bomber.
+  if (buildingKind === "bomber_works") return "bomber";
+  return base;
+}
+
 /** Capacity cost of a unit kind (every unit uses ≥1). */
 export function unitCapCost(kind: UnitKind): number {
   if (kind === "tank") return 2;
-  if (kind === "flyer") return 2;
+  if (kind === "flyer" || kind === "interceptor") return 2;
+  if (kind === "bomber") return 3;
   return 1;
 }
 
@@ -414,7 +479,8 @@ export function raceUnitMul(race: RaceId, kind: UnitKind): { speed: number; dmg:
     return { speed: 0.98, dmg: 1.05 };
   }
   if (race === "blight") {
-    if (kind === "flyer" || kind === "scout") return { speed: 1.1, dmg: 1.08 };
+    if (kind === "flyer" || kind === "interceptor" || kind === "bomber" || kind === "scout")
+      return { speed: 1.1, dmg: 1.08 };
     return { speed: 1, dmg: 1 };
   }
   return { speed: 1, dmg: 1 };

@@ -11,8 +11,10 @@ import {
   type WireEntity,
 } from "./entityTypes";
 import { recycleOpNode, syncOps } from "./entityOps";
+import { makePlumeGeo, type PlumeMesh } from "./entityPlumes";
 import { syncUnits, updateDust } from "./entityUnits";
-import { makeBuildingGeos, makeUnitGeos } from "./planetMath";
+import { makeBuildingGeos } from "./buildingGeos";
+import { makeUnitGeos } from "./unitGeos";
 import { PlanetFloaterLayer } from "./planetFloaters";
 
 /** Minerals, buildings, units, projectiles, dust, mine lasers. */
@@ -37,6 +39,8 @@ export class PlanetEntityLayer {
   padMat: THREE.MeshBasicMaterial;
   dustMat: THREE.MeshBasicMaterial;
   dustGeo: THREE.BufferGeometry;
+  plumeMat: THREE.MeshBasicMaterial;
+  plumeGeo: THREE.BufferGeometry;
 
   unitPool: THREE.Object3D[] = [];
   turretPool: THREE.Object3D[] = [];
@@ -47,6 +51,7 @@ export class PlanetEntityLayer {
   skyPool: THREE.Mesh[] = [];
   crystalPool: THREE.Mesh[] = [];
   dustPool: DustPuff[] = [];
+  plumePool: THREE.Object3D[] = [];
   dustActive = 0;
   unitSmooth = new Map<number, UnitSmooth>();
   buildFirstSeen = new Map<number, number>();
@@ -198,6 +203,18 @@ export class PlanetEntityLayer {
       this.dustGeo.computeVertexNormals();
     }
 
+    // Thruster plumes — additive, no depth write, tinted per race on acquire
+    this.plumeGeo = makePlumeGeo();
+    this.plumeMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+
     const unitEdge = (g: THREE.BufferGeometry) => new THREE.EdgesGeometry(g, 22);
     this.unitEdges = {
       worker: unitEdge(this.unitGeos.worker),
@@ -206,6 +223,8 @@ export class PlanetEntityLayer {
       raider: unitEdge(this.unitGeos.raider),
       tank: unitEdge(this.unitGeos.tank),
       flyer: unitEdge(this.unitGeos.flyer),
+      interceptor: unitEdge(this.unitGeos.interceptor),
+      bomber: unitEdge(this.unitGeos.bomber),
       scout: unitEdge(this.unitGeos.scout),
     };
     const bEdge = (g: THREE.BufferGeometry) => new THREE.EdgesGeometry(g, 18);
@@ -374,6 +393,20 @@ export class PlanetEntityLayer {
     return g;
   }
 
+  acquirePlume(race: RaceId): PlumeMesh {
+    let m = this.plumePool.pop() as PlumeMesh | undefined;
+    if (!m) {
+      const mesh = new THREE.Mesh(this.plumeGeo, this.plumeMat.clone());
+      mesh.renderOrder = 5;
+      mesh.frustumCulled = false;
+      mesh.userData = { pool: "plume" };
+      m = mesh as unknown as PlumeMesh;
+    }
+    (m.material as THREE.MeshBasicMaterial).color.set(RACES[race].tint);
+    m.visible = true;
+    return m;
+  }
+
   buildingKit(kind: BuildingKind) {
     const kits = this.bGeos.kits;
     if (!kits) return null;
@@ -383,17 +416,18 @@ export class PlanetEntityLayer {
   recycleAll() {
     while (this.entityRoot.children.length) {
       const c = this.entityRoot.children.pop()!;
-      // Ops rover turrets are parented under the chassis — detach before pooling
+      // Rover turrets and thruster plumes ride under the shell — detach first
       for (let i = c.children.length - 1; i >= 0; i--) {
         const ch = c.children[i]!;
-        if (ch.userData?.pool === "turret") {
-          c.remove(ch);
-          ch.visible = false;
-          ch.position.set(0, 0, 0);
-          ch.rotation.set(0, 0, 0);
-          ch.scale.set(1, 1, 1);
-          this.turretPool.push(ch);
-        }
+        const chTag = ch.userData?.pool;
+        if (chTag !== "turret" && chTag !== "plume") continue;
+        c.remove(ch);
+        ch.visible = false;
+        ch.position.set(0, 0, 0);
+        ch.rotation.set(0, 0, 0);
+        ch.scale.set(1, 1, 1);
+        if (chTag === "plume") this.plumePool.push(ch);
+        else this.turretPool.push(ch);
       }
       c.visible = false;
       const tag = c.userData?.pool as string | undefined;
@@ -425,8 +459,14 @@ export class PlanetEntityLayer {
     this.padMat.dispose();
     this.dustMat.dispose();
     this.dustGeo.dispose();
+    this.plumeMat.dispose();
+    this.plumeGeo.dispose();
     for (const p of this.dustPool) {
       (p.mesh.material as THREE.Material).dispose();
+    }
+    for (const p of this.plumePool) {
+      const m = (p as THREE.Mesh).material as THREE.Material | undefined;
+      m?.dispose();
     }
     Object.values(this.unitGeos).forEach((g) => g.dispose());
     Object.values(this.unitEdges).forEach((g) => g.dispose());

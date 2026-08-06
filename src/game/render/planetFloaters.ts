@@ -53,7 +53,7 @@ export class PlanetFloaterLayer {
   }
 
   private amountKey(amount: number) {
-    // Ops 7.28, blight 7.42, base 7 — show one decimal only if needed
+    // Operators 7.28, blight 7.42, base 7 — show one decimal only if needed
     const r = Math.round(amount * 100) / 100;
     if (Math.abs(r - Math.round(r)) < 1e-6) return `+${Math.round(r)}`;
     return `+${r.toFixed(1)}`;

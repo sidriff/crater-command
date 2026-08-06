@@ -569,7 +569,7 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
         cfg.localRace === "mandate"
           ? ADVISOR_LINES.matchStartMandate
           : cfg.localRace === "operators"
-            ? ADVISOR_LINES.matchStartOps
+            ? ADVISOR_LINES.matchStartOperators
             : ADVISOR_LINES.matchStart;
       unAdvisor = mountAdvisor(
         advisorHost,

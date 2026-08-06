@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
 // Lab shell — modular previews of the real game view (PlanetView + sim).
-// Port 8090 so it can run alongside the main game on 8080.
+// Prefer 8090 (alongside game on 8080); if taken, walk upward.
 export default defineConfig({
   root: rootDir,
   publicDir: false,
@@ -17,13 +17,14 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 8090,
-    strictPort: true,
+    strictPort: false,
   },
   preview: {
     host: "0.0.0.0",
     port: 8090,
-    strictPort: true,
+    strictPort: false,
   },
+
   build: {
     outDir: resolve(rootDir, "dist"),
     emptyOutDir: true,

@@ -23,7 +23,7 @@ type AssistState = {
 
 /**
  * Placement-mode visuals: spacing ring, circular terrain wash (discs + blocked Xs),
- * blocker highlight, Ops scaffold ghost.
+ * blocker highlight, Operators scaffold ghost.
  */
 export class PlanetPlaceAssist {
   private root = new THREE.Group();

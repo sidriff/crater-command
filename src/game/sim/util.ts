@@ -32,7 +32,8 @@ export function cellKey(x: number, y: number) {
 
 export function unitShotStyle(kind: UnitKind): ProjectileStyle {
   if (kind === "tank") return "shell";
-  if (kind === "flyer" || kind === "scout") return "laser";
+  if (kind === "flyer" || kind === "interceptor" || kind === "scout") return "laser";
+  if (kind === "bomber") return "shell";
   return "bolt";
 }
 
@@ -43,7 +44,8 @@ export function buildingShotStyle(kind: BuildingKind): ProjectileStyle {
 
 export function sepRadius(kind: UnitKind): number {
   if (kind === "tank") return 0.95;
-  if (kind === "flyer") return 0.85;
+  if (kind === "flyer" || kind === "interceptor") return 0.85;
+  if (kind === "bomber") return 1.05;
   if (kind === "raider") return 0.7;
   if (kind === "scout") return 0.65;
   return 0.55; // worker

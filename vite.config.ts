@@ -1,16 +1,17 @@
 import { defineConfig } from "vite";
 
-// Vanilla SPA — Three.js + raw HTML/CSS. Bind 0.0.0.0:8080 for live preview.
+// Vanilla SPA — Three.js + raw HTML/CSS.
+// Prefer 8080; if taken, Vite walks upward (strictPort: false).
 export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 8080,
-    strictPort: true,
+    strictPort: false,
   },
   preview: {
     host: "0.0.0.0",
     port: 8080,
-    strictPort: true,
+    strictPort: false,
   },
   build: {
     outDir: "dist",

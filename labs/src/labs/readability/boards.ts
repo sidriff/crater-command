@@ -1,5 +1,10 @@
 import { START_P0 } from "@game/sim/terrain";
-import type { BuildingKind, RaceId, SimSnapshot } from "@game/sim/types";
+import type {
+  BuildingKind,
+  RaceId,
+  SimSnapshot,
+  UnitKind,
+} from "@game/sim/types";
 import {
   emptySnapshot,
   makeBuilding,
@@ -18,8 +23,8 @@ export interface BoardDef {
   build: () => SimSnapshot;
 }
 
-/** Ops identity chart — every placeable kind in a grid near P0. */
-const IDENTITY_KINDS: BuildingKind[] = [
+/** Operators identity chart — every placeable kind in a grid near P0. */
+export const IDENTITY_BUILDING_KINDS: readonly BuildingKind[] = [
   "core",
   "depot",
   "refinery",
@@ -38,34 +43,86 @@ const IDENTITY_KINDS: BuildingKind[] = [
   "artillery",
   "airpad",
   "factory",
+  "extractor",
 ];
+
+/** Unit column on the identity board (order = vertical stack). */
+export const IDENTITY_UNIT_KINDS: readonly UnitKind[] = [
+  "worker",
+  "scout",
+  "raider",
+  "tank",
+  "flyer",
+  "interceptor",
+  "bomber",
+];
+
+const IDENTITY_ORIGIN = { x: START_P0.x - 3.5, y: START_P0.y - 2.2 };
+const IDENTITY_COLS = 6;
+const IDENTITY_SPACING = 1.35;
+const IDENTITY_UNIT_GAP = 1.1;
+
+export type IdentityAnchor = {
+  entity: "building" | "unit";
+  kind: BuildingKind | UnitKind;
+  x: number;
+  y: number;
+};
+
+/** Map positions for every entity on the identity board (stable for focus). */
+export function identityAnchors(): IdentityAnchor[] {
+  const origin = IDENTITY_ORIGIN;
+  const out: IdentityAnchor[] = [];
+  IDENTITY_BUILDING_KINDS.forEach((kind, i) => {
+    const col = i % IDENTITY_COLS;
+    const row = Math.floor(i / IDENTITY_COLS);
+    out.push({
+      entity: "building",
+      kind,
+      x: origin.x + col * IDENTITY_SPACING,
+      y: origin.y + row * IDENTITY_SPACING,
+    });
+  });
+  const ux = origin.x + IDENTITY_COLS * IDENTITY_SPACING + 0.8;
+  IDENTITY_UNIT_KINDS.forEach((kind, i) => {
+    out.push({
+      entity: "unit",
+      kind,
+      x: ux,
+      y: origin.y + i * IDENTITY_UNIT_GAP,
+    });
+  });
+  return out;
+}
+
+export function identityPosition(
+  entity: "building" | "unit",
+  kind: BuildingKind | UnitKind,
+): { x: number; y: number } | null {
+  const hit = identityAnchors().find((a) => a.entity === entity && a.kind === kind);
+  return hit ? { x: hit.x, y: hit.y } : null;
+}
 
 function identityBoard(): SimSnapshot {
   const snap = emptySnapshot({ race0: "operators", race1: "blight" });
-  const origin = { x: START_P0.x - 3.5, y: START_P0.y - 2.2 };
-  const cols = 6;
-  const spacing = 1.35;
-  IDENTITY_KINDS.forEach((kind, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    snap.buildings.push(
-      makeBuilding(0, kind, origin.x + col * spacing, origin.y + row * spacing, {
-        isTech:
-          kind === "command" ||
-          kind === "logistics" ||
-          kind === "em_array" ||
-          kind === "strike_dock" ||
-          kind === "null_lattice" ||
-          kind === "bomber_works",
-      }),
-    );
-  });
-  // One of each unit for silhouette check
-  const ux = origin.x + cols * spacing + 0.8;
-  const units = ["worker", "raider", "tank", "flyer", "scout"] as const;
-  units.forEach((k, i) => {
-    snap.units.push(makeUnit(0, k, ux, origin.y + i * 1.1));
-  });
+  for (const a of identityAnchors()) {
+    if (a.entity === "building") {
+      const kind = a.kind as BuildingKind;
+      snap.buildings.push(
+        makeBuilding(0, kind, a.x, a.y, {
+          isTech:
+            kind === "command" ||
+            kind === "logistics" ||
+            kind === "em_array" ||
+            kind === "strike_dock" ||
+            kind === "null_lattice" ||
+            kind === "bomber_works",
+        }),
+      );
+    } else {
+      snap.units.push(makeUnit(0, a.kind as UnitKind, a.x, a.y));
+    }
+  }
   return snap;
 }
 
@@ -238,7 +295,7 @@ export function boardById(id: BoardId): BoardDef {
 export function buildBoard(id: BoardId, race0: RaceId = "operators"): SimSnapshot {
   const snap = boardById(id).build();
   if (snap.players[0]) snap.players[0].race = race0;
-  // Keep enemy contrast: operators→blight, else operators as foe when you're not ops
+  // Keep enemy contrast: operators→blight, else operators as foe when you're not operators
   if (snap.players[1]) {
     snap.players[1].race = race0 === "operators" ? "blight" : "operators";
   }

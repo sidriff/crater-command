@@ -34,7 +34,7 @@ const ADVISORS: Record<
   operators: {
     video: "/advisor/operators_idle.mp4?v=1",
     poster: "/advisor/operators.jpg?v=3",
-    call: "OPS // OPEN CHANNEL",
+    call: "OPERATORS // OPEN CHANNEL",
     line: "Stay light. Hit first.",
   },
   blight: {

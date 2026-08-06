@@ -38,7 +38,9 @@ export function syncMineBeams(host: BeamsHost, snap: SimSnapshot) {
   }
 
 export function syncCombatProjectiles(host: BeamsHost, snap: SimSnapshot) {
-    const elev = (air: number) => (air > 0.5 ? 1.5 : 0.4);
+    // fromAir ≤0.5 ground; 1 ≈ flyer; >1 lifts toward scout cruise (~2.5)
+    const elev = (air: number) =>
+      air > 0.5 ? 1.5 + Math.max(0, air - 1) * 2.0 : 0.4;
     for (const p of snap.projectiles) {
       if (p.style === "mine" || p.targetIsMineral) continue;
       if (!host.isVisible(p.x, p.y) && !host.isVisible(p.tx, p.ty) && !host.isVisible(p.ox, p.oy))
@@ -52,7 +54,9 @@ export function syncCombatProjectiles(host: BeamsHost, snap: SimSnapshot) {
       if (!mesh) {
         mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 5, 1, true), mat);
       }
-      mat.opacity = 0.9;
+      // Light path lasers (scout) read thinner / dimmer than flyer AA beams
+      const lightLaser = p.style === "laser" && p.damage > 0 && p.damage <= 7;
+      mat.opacity = lightLaser ? 0.72 : 0.9;
       mesh.material = mat;
       mesh.visible = true;
 
@@ -66,7 +70,7 @@ export function syncCombatProjectiles(host: BeamsHost, snap: SimSnapshot) {
       const dir = b.clone().sub(a);
       const len = Math.max(0.15, dir.length());
       mesh.position.copy(mid);
-      const rScale = p.style === "shell" ? 1.4 : 1;
+      const rScale = p.style === "shell" ? 1.4 : lightLaser ? 0.48 : p.style === "laser" ? 0.8 : 1;
       mesh.scale.set(rScale, len, rScale);
       if (dir.lengthSq() > 1e-10) {
         mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());

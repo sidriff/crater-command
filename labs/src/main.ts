@@ -1,13 +1,37 @@
 /**
  * Lab shell — picker, generated levers, stats.
  * Labs own their update loop content; shell only calls tick + renders UI chrome.
+ *
+ * Deep links (model-friendly):
+ *   /?lab=mesh&mesh=u:scout
+ *   /?lab=mesh&mesh=scout
+ *   /?lab=readability
+ *   /?lab=concept&concept=rover
+ *
+ * Runtime API: window.ccLabs.openMesh("u:scout") · openConcept("rover") · openLab("concept")
  */
 import type { Lab, LabContext } from "./lab";
 import { LeverRegistry, mountLeverPanel } from "./levers";
+import {
+  getConceptLabHandle,
+  makeConceptLab,
+  resolveConceptId,
+} from "./labs/concept/index";
+import {
+  getMeshLabHandle,
+  listMeshCatalog,
+  makeMeshLab,
+  resolveMeshId,
+} from "./labs/mesh/index";
 import { makeReadabilityLab } from "./labs/readability/index";
+import { readLabQuery, writeLabQuery } from "./query";
 import "./styles.css";
 
-const LAB_FACTORIES: Array<() => Lab> = [makeReadabilityLab];
+const LAB_FACTORIES: Array<() => Lab> = [
+  makeReadabilityLab,
+  makeMeshLab,
+  makeConceptLab,
+];
 const ACTIVE_KEY = "crater-labs:active";
 
 function rememberedId(): string | null {
@@ -24,6 +48,10 @@ function remember(id: string) {
   } catch {
     /* ignore */
   }
+}
+
+function factoryById(id: string): (() => Lab) | undefined {
+  return LAB_FACTORIES.find((f) => f().id === id);
 }
 
 const app = document.getElementById("app");
@@ -99,6 +127,14 @@ function activate(factory: () => Lab) {
   const lab = factory();
   active = lab;
   remember(lab.id);
+  const prev = readLabQuery();
+  writeLabQuery({
+    lab: lab.id,
+    // keep deep-link params only for the lab that owns them
+    mesh: lab.id === "mesh" ? prev.mesh : null,
+    concept: lab.id === "concept" ? prev.concept : null,
+    board: lab.id === "readability" ? prev.board : null,
+  });
   blurbEl.textContent = lab.blurb;
   levers.register(lab.levers);
   panelCtl = mountLeverPanel(leverHost, levers, {
@@ -124,6 +160,50 @@ function paintPicker() {
   }
 }
 
+function openLab(id: string): boolean {
+  const factory = factoryById(id);
+  if (!factory) return false;
+  if (active?.id === id) return true;
+  activate(factory);
+  return true;
+}
+
+function openMesh(raw: string): boolean {
+  const id = resolveMeshId(raw);
+  if (!id) return false;
+  writeLabQuery({ lab: "mesh", mesh: id });
+  if (active?.id !== "mesh") {
+    activate(makeMeshLab);
+    return getMeshLabHandle()?.current() === id;
+  }
+  return getMeshLabHandle()?.load(id) ?? false;
+}
+
+function openConcept(raw: string): boolean {
+  const id = resolveConceptId(raw);
+  if (!id) return false;
+  writeLabQuery({ lab: "concept", concept: id });
+  if (active?.id !== "concept") {
+    activate(makeConceptLab);
+    return getConceptLabHandle()?.current() === id;
+  }
+  return getConceptLabHandle()?.load(id) ?? false;
+}
+
+/** Public API for agents / console — no UI clicking required. */
+window.ccLabs = {
+  lab: () => active?.id ?? null,
+  openLab,
+  openMesh,
+  openConcept,
+  listMeshes: () => listMeshCatalog(),
+  listLabs: () => LAB_FACTORIES.map((f) => f().id),
+  mesh: () => getMeshLabHandle()?.current() ?? null,
+  meshFeedback: () => getMeshLabHandle()?.exportFeedback() ?? null,
+  concept: () => getConceptLabHandle()?.current() ?? null,
+  conceptFeedback: () => getConceptLabHandle()?.exportFeedback() ?? null,
+};
+
 function loop(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -131,9 +211,18 @@ function loop(now: number) {
   raf = requestAnimationFrame(loop);
 }
 
-const want = rememberedId();
-const start =
-  LAB_FACTORIES.find((f) => f().id === want) ?? LAB_FACTORIES[0]!;
+// Boot: URL beats localStorage. ?mesh= alone implies mesh lab; ?concept= → concept.
+const q = readLabQuery();
+const fromUrl =
+  q.lab && factoryById(q.lab)
+    ? q.lab
+    : q.mesh && resolveMeshId(q.mesh)
+      ? "mesh"
+      : q.concept && resolveConceptId(q.concept)
+        ? "concept"
+        : null;
+const want = fromUrl ?? rememberedId();
+const start = (want && factoryById(want)) || LAB_FACTORIES[0]!;
 activate(start);
 raf = requestAnimationFrame(loop);
 
@@ -141,3 +230,44 @@ window.addEventListener("beforeunload", () => {
   cancelAnimationFrame(raf);
   active?.teardown(ctx);
 });
+
+// Back/forward on query changes
+window.addEventListener("popstate", () => {
+  const nq = readLabQuery();
+  const labId =
+    nq.lab && factoryById(nq.lab)
+      ? nq.lab
+      : nq.mesh && resolveMeshId(nq.mesh)
+        ? "mesh"
+        : nq.concept && resolveConceptId(nq.concept)
+          ? "concept"
+          : active?.id;
+  if (labId && labId !== active?.id) {
+    const f = factoryById(labId);
+    if (f) activate(f);
+    return;
+  }
+  if (active?.id === "mesh" && nq.mesh) {
+    getMeshLabHandle()?.load(nq.mesh);
+  }
+  if (active?.id === "concept" && nq.concept) {
+    getConceptLabHandle()?.load(nq.concept);
+  }
+});
+
+declare global {
+  interface Window {
+    ccLabs: {
+      lab(): string | null;
+      openLab(id: string): boolean;
+      openMesh(raw: string): boolean;
+      openConcept(raw: string): boolean;
+      listMeshes(): { id: string; label: string; section: string }[];
+      listLabs(): string[];
+      mesh(): string | null;
+      meshFeedback(): string | null;
+      concept(): string | null;
+      conceptFeedback(): string | null;
+    };
+  }
+}

@@ -95,8 +95,8 @@ export function mountLeverPanel(
     host.appendChild(h);
 
     for (const d of defs) {
-      const row = document.createElement("label");
-      row.className = "lab-lever";
+      const row = document.createElement("div");
+      row.className = "lab-lever" + (d.kind === "toggle" ? " lab-lever-toggle" : "");
       row.dataset.id = d.id;
 
       const head = document.createElement("div");
@@ -109,6 +109,7 @@ export function mountLeverPanel(
       head.append(name, val);
 
       const input = document.createElement("input");
+      input.id = `lever-${d.id}`;
       if (d.kind === "toggle") {
         input.type = "checkbox";
         input.checked = levers.get(d.id) >= 0.5;
@@ -125,6 +126,7 @@ export function mountLeverPanel(
         const v = levers.get(d.id);
         if (d.kind === "toggle") {
           val.textContent = v >= 0.5 ? "ON" : "OFF";
+          row.classList.toggle("is-on", v >= 0.5);
         } else {
           const shown =
             d.step != null && d.step >= 1 ? String(Math.round(v)) : v.toFixed(2);
@@ -133,7 +135,7 @@ export function mountLeverPanel(
       };
       writeVal();
 
-      input.addEventListener("input", () => {
+      const onInput = () => {
         if (d.kind === "toggle") {
           levers.set(d.id, input.checked ? 1 : 0);
         } else {
@@ -141,9 +143,21 @@ export function mountLeverPanel(
         }
         writeVal();
         opts?.onChange?.(d.id, levers.get(d.id));
-      });
+      };
+      // range: live drag; toggle: change (avoids double-fire from input+change)
+      input.addEventListener(d.kind === "toggle" ? "change" : "input", onInput);
 
-      row.append(head, input);
+      if (d.kind === "toggle") {
+        // Clickable row: label associates with checkbox without double-wrap issues
+        const label = document.createElement("label");
+        label.className = "lab-lever-toggle-row";
+        label.htmlFor = input.id;
+        label.append(input, head);
+        row.appendChild(label);
+      } else {
+        // Range: don't wrap in <label> (label-click jumps the thumb to click pos)
+        row.append(head, input);
+      }
       if (d.tradesAgainst) {
         const trade = document.createElement("div");
         trade.className = "lab-lever-trade";
@@ -167,7 +181,9 @@ export function mountLeverPanel(
         if (d.kind === "toggle") input.checked = v >= 0.5;
         else input.value = String(v);
         const row = host.querySelector(`[data-id="${id}"]`);
-        const valEl = row?.querySelector(".lab-lever-val");
+        if (!row) continue;
+        if (d.kind === "toggle") row.classList.toggle("is-on", v >= 0.5);
+        const valEl = row.querySelector(".lab-lever-val");
         if (valEl) {
           if (d.kind === "toggle") valEl.textContent = v >= 0.5 ? "ON" : "OFF";
           else {

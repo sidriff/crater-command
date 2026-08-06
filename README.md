@@ -32,22 +32,46 @@ npm run dev
 | | Bun | npm |
 |---|-----|-----|
 | Install | `bun install` | `npm install` |
-| Dev (http://localhost:8080) | `bun dev` | `npm run dev` |
+| Dev (prefers :8080) | `bun dev` | `npm run dev` |
 | Build | `bun run build` | `npm run build` |
-| Preview | `bun run preview` | `npm run preview` |
+| Preview (prefers :8080) | `bun run preview` | `npm run preview` |
 | Typecheck | `bun run typecheck` | `npm run typecheck` |
-| Labs | `bun run lab` → :8090 | `npm run lab` → :8090 |
+| Labs (prefers :8090) | `bun run lab` | `npm run lab` |
+
+Dev / lab / preview prefer those ports; if busy, Vite picks the next free one and prints the URL.
 
 ## Labs
 
-Modular previews of the **real** match view (`PlanetView` + entity layer), not alternate art.
+Modular previews of **real** game chrome — not alternate art.
 
 ```bash
-npm run lab   # http://localhost:8090
+npm run lab   # prefers http://localhost:8090
 ```
 
 | Lab | What |
 |-----|------|
 | **Readability** | Blank globe + scenario boards (identity grid, contact, FOW edge, clutter). Scorecard / PNG / JSON for visual passes. |
+| **Mesh** | Isolate one unit/building solid (`planetMath` geos) with CRT hull + wire. Orbit, tint, edge crease, screenshot. |
+
+### Deep links (Mesh)
+
+Models / scripts can open a mesh without clicking the picker:
+
+```
+http://localhost:8090/?lab=mesh&mesh=u:scout
+http://localhost:8090/?mesh=scout          # bare slug; implies mesh lab
+```
+
+`mesh` accepts exact id (`u:scout`), bare slug (`scout`), or unique label substring.
+
+Console / agent API:
+
+```js
+ccLabs.listMeshes()           // [{ id, label, section }, …]
+ccLabs.openMesh("u:scout")    // true if resolved
+ccLabs.openMesh("drone")      // fuzzy label ok if unique
+ccLabs.mesh()                 // current id
+ccLabs.openLab("mesh")
+```
 
 Shell + labs live under `labs/`. Game code is imported via `@game/*`.
