@@ -398,16 +398,21 @@ body {
 }
 
 .mesh-concept-img {
-  flex: 1;
+  /* flex-basis 0 so intrinsic plate size doesn't cap the box */
+  flex: 1 1 0;
   min-height: 0;
   width: 100%;
+  height: 100%;
+  display: block;
   object-fit: contain;
+  object-position: center;
   background: #000;
   padding: 8px;
 }
 
 .mesh-concept-miss {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -416,6 +421,13 @@ body {
   font-size: 11px;
   text-align: center;
   line-height: 1.4;
+}
+
+/* Author `display` beats UA [hidden]{display:none} — without this the empty
+   miss pane still flex-grows and steals half the concept quadrant. */
+.mesh-concept-img[hidden],
+.mesh-concept-miss[hidden] {
+  display: none !important;
 }
 
 .mesh-readability-pane {
@@ -574,6 +586,58 @@ body {
 .lab-lever-val {
   color: var(--primary);
   font-variant-numeric: tabular-nums;
+}
+
+.lab-lever-num-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.lab-lever-num {
+  width: 5em;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 4px;
+  text-align: right;
+}
+
+.lab-lever-num:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+/* Value typed past slider min/max */
+.lab-lever-num.is-overridden {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+}
+
+.lab-lever input[type="range"].is-overridden {
+  accent-color: var(--warn);
+}
+
+/* Hide spinners — type values; arrow keys still step */
+.lab-lever-num::-webkit-outer-spin-button,
+.lab-lever-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.lab-lever-num[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.lab-lever-unit {
+  color: var(--muted);
+  font-size: 10px;
+  min-width: 0.9em;
 }
 
 .lab-lever input[type="range"] {
@@ -768,6 +832,107 @@ body {
   font-size: 10px;
   line-height: 1.35;
   margin: 0 0 8px;
+}
+
+/* ── Dispatch lab (producer egress) ───────────────────── */
+
+.dispatch-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.dispatch-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+}
+
+.dispatch-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dispatch-card-badge {
+  flex-shrink: 0;
+  width: 1.25em;
+  height: 1.25em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: #000;
+}
+
+.dispatch-card.is-keep .dispatch-card-badge,
+.dispatch-card-badge[data-verdict="keep"] {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.dispatch-card.is-revise .dispatch-card-badge,
+.dispatch-card-badge[data-verdict="revise"] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+}
+
+.dispatch-card.is-reject .dispatch-card-badge,
+.dispatch-card-badge[data-verdict="reject"] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.dispatch-card.is-stub {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.dispatch-card.is-active {
+  background: var(--primary);
+  color: #001208;
+  border-color: var(--primary);
+  opacity: 1;
+}
+
+.dispatch-card.is-active .dispatch-card-badge {
+  background: #001208;
+}
+
+.dispatch-card.is-keep:not(.is-active) {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.dispatch-card.is-revise:not(.is-active) {
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--border));
+}
+
+.dispatch-card.is-reject:not(.is-active) {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  opacity: 0.8;
+}
+
+.dispatch-scrub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dispatch-scrub {
+  width: 100%;
+  margin: 4px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 
 /* ── Concept lab (wireframe art gallery) ───────────────── */

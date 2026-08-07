@@ -1,3 +1,4 @@
+import { resetCombatSfx, tickCombatSfx } from "../game/audio/combatSfx";
 import {
   ensureMusicFromGesture,
   isMusicMuted,
@@ -24,6 +25,7 @@ import {
 } from "../game/sim/deck";
 import { MATCH_SECONDS, RACES, unitCapCost } from "../game/sim/defs";
 import type { BuildingKind, RaceId, SimSnapshot } from "../game/sim/types";
+import { bakeMeshIcons, iconUrl, type MeshIconMap } from "../game/render/meshIcons";
 import { PlanetView } from "../game/render/planetView";
 import { ADVISOR_LINES, mountAdvisor } from "./advisor";
 
@@ -210,6 +212,14 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
   let lastMsgAt = 0;
   let lastHandKey = "";
 
+  // Phosphor mesh thumbs (labs-style) for deck cards — bake once per match.
+  let meshIcons: MeshIconMap = {};
+  try {
+    meshIcons = bakeMeshIcons(cfg.localRace);
+  } catch (e) {
+    console.warn("mesh icon bake failed", e);
+  }
+
   const exitPlaceMode = () => {
     if (placeCommitTimer != null) {
       window.clearTimeout(placeCommitTimer);
@@ -353,6 +363,13 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
     placeConfirmBtn.classList.remove("ok");
   };
 
+  const cardIconHtml = (card: ReturnType<typeof cardOf>, size: "hand" | "next") => {
+    const src = iconUrl(meshIcons, card, cfg.localRace);
+    if (!src) return "";
+    const cls = size === "hand" ? "hand-icon" : "next-card-icon";
+    return `<img class="${cls}" src="${src}" alt="" draggable="false" />`;
+  };
+
   const renderNextCard = (nextId: string | null, en: number) => {
     if (!nextId) {
       nextCardEl.className = "next-card empty";
@@ -368,6 +385,7 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
     nextCardEl.innerHTML = `
       ${card.tech ? `<span class="next-tech">TECH</span>` : ""}
       ${card.operation ? `<span class="next-tech next-op">OP</span>` : ""}
+      ${cardIconHtml(card, "next")}
       <span class="next-card-name">${card.short}</span>
       <span class="next-card-cost">${card.cost}</span>
     `;
@@ -394,14 +412,19 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
       const card = cardOf(cid as CardId);
       const btn = document.createElement("button");
       btn.type = "button";
+      const hasIcon = !!iconUrl(meshIcons, card, cfg.localRace);
       btn.className =
-        "hand-card" + (card.tech ? " is-tech" : "") + (card.operation ? " is-op" : "");
+        "hand-card" +
+        (card.tech ? " is-tech" : "") +
+        (card.operation ? " is-op" : "") +
+        (hasIcon ? " has-icon" : "");
       btn.dataset.ui = "";
       btn.dataset.idx = String(i);
       if (en < card.cost || phase !== "playing") btn.classList.add("cant-afford");
       btn.innerHTML = `
         ${card.tech ? `<span class="hand-tech">TECH</span>` : ""}
         ${card.operation ? `<span class="hand-tech hand-op">OP</span>` : ""}
+        ${cardIconHtml(card, "hand")}
         <span class="hand-name">${card.short}</span>
         <span class="hand-cost">${card.cost}</span>
       `;
@@ -561,6 +584,7 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
   unsub = session.on((snap: SimSnapshot) => {
     if (disposed) return;
     view?.setSnapshot(snap);
+    tickCombatSfx(snap);
     loading.classList.add("hidden");
 
     if (!didAdvisor) {
@@ -704,6 +728,7 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
       unAdvisor?.();
       session?.stop();
       view?.dispose();
+      resetCombatSfx();
       stage.replaceChildren();
     },
   };

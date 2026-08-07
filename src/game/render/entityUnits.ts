@@ -3,7 +3,15 @@ import { MAP_W, UNITS } from "../sim/defs";
 import type { PlayerId, RaceId, SimSnapshot, UnitKind } from "../sim/types";
 import { SCOUT_PAD } from "./buildingGeos";
 import { crtWinkIn } from "./entityCrt";
-import { FLYER_RIG, SCOUT_RIG, attachPlumes, type PlumeHost } from "./entityPlumes";
+import {
+  BOMBER_RIG,
+  FLYER_RIG,
+  INTERCEPTOR_RIG,
+  SCOUT_RIG,
+  attachPlumes,
+  type PlumeHost,
+  type PlumeRig,
+} from "./entityPlumes";
 import {
   DIVE_DUR,
   DUST_MAX,
@@ -26,12 +34,30 @@ import {
   smoothToward,
 } from "./planetMath";
 import {
+  BOMBER_PIVOT_Y,
   FLYER_PIVOT_Y,
+  INTERCEPTOR_PIVOT_Y,
   ROVER_TURRET_PIVOT,
   ROVER_TURRET_TIP,
   SCOUT_PIVOT_Y,
   SCOUT_VENTRAL_Y,
 } from "./unitGeos";
+
+/** Roll-axis height for air units (model space). */
+function airPivotY(kind: UnitKind): number {
+  if (kind === "scout") return SCOUT_PIVOT_Y;
+  if (kind === "interceptor") return INTERCEPTOR_PIVOT_Y;
+  if (kind === "bomber") return BOMBER_PIVOT_Y;
+  return FLYER_PIVOT_Y;
+}
+
+/** Thruster plume layout for air units. */
+function airPlumeRig(kind: UnitKind): PlumeRig {
+  if (kind === "scout") return SCOUT_RIG;
+  if (kind === "interceptor") return INTERCEPTOR_RIG;
+  if (kind === "bomber") return BOMBER_RIG;
+  return FLYER_RIG;
+}
 
 export type UnitsHost = PlumeHost & {
   viewer: PlayerId;
@@ -743,11 +769,11 @@ export function syncUnits(host: UnitsHost, snap: SimSnapshot, dt: number) {
           railBlend
         : 0;
       // Aircraft roll about their own spine; ground kit rolls about its wheels.
-      const pivotY = air ? (isScout ? SCOUT_PIVOT_Y : FLYER_PIVOT_Y) : 0;
+      const pivotY = air ? airPivotY(u.kind) : 0;
       placeOnSurface(shell, s.x, s.y, elev, ox, 0, 0, sx, sy, sz, s.yaw, bank, pitch, pivotY);
       host.entityRoot.add(shell);
 
-      if (air) attachPlumes(host, shell, isScout ? SCOUT_RIG : FLYER_RIG, s, race, snap.t, u.id);
+      if (air) attachPlumes(host, shell, airPlumeRig(u.kind), s, race, snap.t, u.id);
 
       if (isOperatorsRover) {
         const turret = host.acquireWire(

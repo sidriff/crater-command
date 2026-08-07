@@ -1,7 +1,7 @@
 /**
  * Unit mesh catalog — procedural Three.js geometries for match + labs mesh browser.
  */
-import { box, cone, cyl, flatHex, mergeParts, plate, sph } from "./meshKit";
+import { box, cone, cyl, flatHex, loftRings, mergeParts, plate, sph } from "./meshKit";
 
 /**
  * Operators rover turret pivot (unscaled mesh units).
@@ -114,6 +114,28 @@ export const FLYER_RCS = [
   { x: -0.63, y: 0.24, z: -0.04 },
 ] as const;
 
+/** Interceptor: roll axis down the lifting body; aft bells + wingtip pods. */
+export const INTERCEPTOR_PIVOT_Y = 0.4;
+export const INTERCEPTOR_BELLS = [
+  { x: 0.115, y: 0.42, z: -0.76 },
+  { x: -0.115, y: 0.42, z: -0.76 },
+] as const;
+export const INTERCEPTOR_RCS = [
+  { x: 0.585, y: 0.27, z: -0.44 },
+  { x: -0.585, y: 0.27, z: -0.44 },
+] as const;
+
+/** Bomber: mains hang off the wing nacelles, not the fuselage. */
+export const BOMBER_PIVOT_Y = 0.42;
+export const BOMBER_BELLS = [
+  { x: 0.56, y: 0.5, z: -0.56 },
+  { x: -0.56, y: 0.5, z: -0.56 },
+] as const;
+export const BOMBER_RCS = [
+  { x: 0.98, y: 0.34, z: -0.2 },
+  { x: -0.98, y: 0.34, z: -0.2 },
+] as const;
+
 /**
  * Individual makers are exported so buildingGeos can stage a product on a
  * producer's apron without paying for the whole unit pack twice.
@@ -223,145 +245,102 @@ export function makeWorkerOpsTurretGeo() {
  * Raider — Operators fast light attack buggy. **Ground unit** (`defs.ts`: no
  * air, attacks ground only, range 1.4, hp 70, the fastest thing on wheels in the
  * game). The concept plate went through a spacecraft phase; ignore that. This is
- * a wheeled machine and nothing on it may read as a wing, a fin or a canopy.
+ * a wheeled machine and nothing on it may read as a wing or a fin.
  *
  * Everything is aimed at the match camera (~40–55° down):
  *
  * 1. **Heading reads in plan because the planform is a dart.** Half-width runs
  *    0.12 at the nose → 0.30 at the shoulder → 0.325 at the hip → 0.245 at the
- *    transom, so the outline is acute forward and boat-tailed aft. The old hull
- *    was a rectangle with a cone glued on the front, which is exactly the failure
- *    the rover pass diagnosed: a nose cone does not give you a heading if the
- *    plan outline is still a box. Mass is asymmetric to match — gun forward,
- *    power module and uplink aft.
- * 2. **The frame is visibly open from above.** The deck is a *trough*: a recessed
- *    pan (top 0.30) between two gunwale rails (top 0.54), with the gun bedded in
- *    the front of the trough, the power module recessed into the back of it, and
- *    a 0.42-long window of daylight between them. The two cross sleepers in that
- *    window are not decoration: without something whose edges sit 0.18 *below*
- *    the rail line the window is black on black and reads as a hole punched in
- *    the deck rather than a floor under it. Rail, sleeper, floor — that layered
- *    stack is what sells a hollow frame.
- * 3. **The wheels stand off the hull on exposed cross axles.** 0.16 of daylight
- *    each side at the rear axle, 0.20 at the front. That gap is the whole
- *    difference between this and the tank's solid track slabs at match zoom, and
- *    it is why the raider reads light: you can see through its running gear.
- * 4. **It is flat for its length.** 0.68 world tall over 1.66 long — a height:
- *    length of 0.41, against the rover's 0.64 and the tank's 0.63. Long and low
- *    is the "fast" read, and every millimetre of height would be paid for in deck
- *    legibility from above.
+ *    transom, so the outline is acute forward and boat-tailed aft. Mass is
+ *    asymmetric to match — short armored prow forward, power pack and stalked
+ *    dish aft.
+ * 2. **The hull top is closed, and "closed" means no ledge.** Two earlier revs
+ *    failed this differently. The first left an open trough (gunwale rails +
+ *    recessed pan). The second stacked a narrower deck on a wider pan, which is
+ *    subtler and just as wrong: the strip of pan top left showing all the way
+ *    round *is* a gunwale, and the match camera reads any continuous horizontal
+ *    rim as the lip of an open tub no matter what is underneath it. So the hull
+ *    is now one thick faceted slab carrying the full dart planform, with a roof
+ *    inset only ~0.035 — a chamfer, ~4px at review zoom, which reads as a bevel
+ *    on a solid body rather than a rail around a hole.
+ * 3. **The dorsal turret is the weapon.** Not a dish on a stalk: that read as a
+ *    radar mushroom, and with the prow gun gone the raider had nothing that
+ *    looked like it could shoot. It is a barbette ring + hex drum + short blunt
+ *    mantlet — round in plan with one square-off face, which is the universal
+ *    turret read and is legible at 58px in a way a flat disk is not. There is no
+ *    raider turret rig in `entityUnits`, so it is baked facing +Z and does not
+ *    yaw; giving it live yaw means generalising the rover's pivot rig.
+ * 4. **No front gun snout.** The prow is armour and a flush sensor hex, nothing
+ *    that protrudes — no receiver, barrel, muzzle collar, or instrument bar
+ *    hanging off the nose. Anything that sticks out forward reads as a gun and
+ *    puts the weapon back on the wrong end of the vehicle. Heading is the dart
+ *    planform, not a barrel.
+ * 5. **The wheels stand off the hull on exposed cross axles.** 0.16+ of daylight
+ *    each side. That gap is the whole difference between this and the tank's
+ *    solid track slabs at match zoom, and it is why the raider reads light.
+ * 6. **It is flat for its length.** Long and low is the "fast" read; the stalked
+ *    dish is the only tall token, and it sits mid-aft so it does not hide the
+ *    dart outline from above.
  *
  * Plan footprints of the three ground vehicles, at their real world scales, are
  * deliberately three different shapes: rover 0.64 × 0.91 (small, squat, open
- * rectangular bed), raider 1.18 × 1.66 (long narrow dart), tank 1.44 × 1.66
+ * rectangular bed), raider ~1.05 × 1.46 (long narrow dart), tank 1.44 × 1.66
  * (wide slab). None of them is confusable at 58px.
  *
- * The gun does not yaw (there is no raider turret rig — see `entityUnits`), so it
- * is mounted fixed fore-aft and elongated ~2.9:1 in plan on purpose: it doubles
- * as the heading cue, which a squat turret pod could never do.
- *
- * No eye. The forward feature is a gun with a plain muzzle collar; the only
- * apertures are the flush hex vent on the aft deck and the flat uplink disk that
- * teleoperates the thing (LORE.md — Operators signal capability, not alertness).
- * Nothing here is thinner than 0.055 model units (≈0.058 world at scale 1.05).
+ * No eye. The only apertures are the flush hex vent on the transom and the
+ * stalked uplink/weapon dish (LORE.md — Operators signal capability, not
+ * alertness). Nothing here is thinner than 0.055 model units
+ * (≈0.058 world at scale 1.05).
  */
 export function makeRaiderGeo() {
-  // Shared planform. Right-hand vertices; the hull, prow and both rails are all
-  // cut from these four stations so every outline in plan agrees with the others.
   const NOSE_X = 0.12;
   const NOSE_Z = 0.84;
-  const SPLIT_Z = 0.6; // where the solid prow ends and the open trough begins
-  const SPLIT_X = 0.197; // hull half-width at SPLIT_Z (on the nose→shoulder line)
-  const RAIL_W = 0.11; // gunwale rail thickness, measured inboard in X
+
+  // Dart stations, shared by hull and roof so the two outlines agree in plan.
+  const HULL: [number, number][] = [
+    [NOSE_X, NOSE_Z],
+    [0.3, 0.28],
+    [0.325, -0.24],
+    [0.245, -0.58],
+    [-0.245, -0.58],
+    [-0.325, -0.24],
+    [-0.3, 0.28],
+    [-NOSE_X, NOSE_Z],
+  ];
+  // Roof: the same dart drawn ~0.035 in on every edge. Inset *toward the
+  // interior*, not by subtracting a constant from z — that would push the
+  // transom out past the hull and hand the rim straight back. See note 2
+  // before widening this.
+  const ROOF: [number, number][] = [
+    [0.095, 0.8],
+    [0.265, 0.27],
+    [0.29, -0.23],
+    [0.215, -0.545],
+    [-0.215, -0.545],
+    [-0.29, -0.23],
+    [-0.265, 0.27],
+    [-0.095, 0.8],
+  ];
 
   return mergeParts([
-    // ── hull pan: the trough floor, full dart planform ───────────────────
-    {
-      geo: plate(
-        [
-          [NOSE_X, NOSE_Z],
-          [0.3, 0.28],
-          [0.325, -0.24],
-          [0.245, -0.58],
-          [-0.245, -0.58],
-          [-0.325, -0.24],
-          [-0.3, 0.28],
-          [-NOSE_X, NOSE_Z],
-        ],
-        0.1,
-      ),
-      y: 0.25,
-    },
-    // ── prow blade: solid forward of the trough, and deliberately 0.08 lower
-    //    than the rail tops so the nose steps down away from the camera ────
-    {
-      geo: plate(
-        [
-          [NOSE_X, NOSE_Z],
-          [SPLIT_X, SPLIT_Z],
-          [-SPLIT_X, SPLIT_Z],
-          [-NOSE_X, NOSE_Z],
-        ],
-        0.16,
-      ),
-      y: 0.38,
-    },
-    // ── gunwale rails: outer edge follows the hull, inner edge inset RAIL_W.
-    //    Mirrored by hand rather than sx:-1 — the hull material is FrontSide,
-    //    and a negative scale would flip the winding and punch a hole in it.
-    {
-      geo: plate(
-        [
-          [SPLIT_X, SPLIT_Z],
-          [0.3, 0.28],
-          [0.325, -0.24],
-          [0.245, -0.58],
-          [0.245 - RAIL_W, -0.58],
-          [0.325 - RAIL_W, -0.24],
-          [0.3 - RAIL_W, 0.28],
-          [SPLIT_X - RAIL_W, SPLIT_Z],
-        ],
-        0.24,
-      ),
-      y: 0.42,
-    },
-    {
-      geo: plate(
-        [
-          [-SPLIT_X, SPLIT_Z],
-          [-0.3, 0.28],
-          [-0.325, -0.24],
-          [-0.245, -0.58],
-          [-(0.245 - RAIL_W), -0.58],
-          [-(0.325 - RAIL_W), -0.24],
-          [-(0.3 - RAIL_W), 0.28],
-          [-(SPLIT_X - RAIL_W), SPLIT_Z],
-        ],
-        0.24,
-      ),
-      y: 0.42,
-    },
-    // ── cross sleepers on the pan floor, 0.18 below the rail tops. Without
-    //    these the open window is just black-on-black and reads as a hole in
-    //    the deck rather than a floor under it. ────────────────────────────
-    { geo: box(0.46, 0.06, 0.09), y: 0.33, z: 0.18 },
-    { geo: box(0.46, 0.06, 0.09), y: 0.33, z: -0.02 },
-    // ── gun: receiver bedded in the front of the trough, barrel lying on the
-    //    prow blade. 0.26 x 0.70 in plan including the barrel. ─────────────
-    { geo: box(0.26, 0.26, 0.34), y: 0.43, z: 0.44 },
-    { geo: box(0.115, 0.115, 0.36), y: 0.5, z: 0.78 },
-    { geo: box(0.19, 0.17, 0.08), y: 0.5, z: 0.925 }, // muzzle collar
-    // ── aft: power module recessed into the trough, uplink over it ────────
-    { geo: box(0.4, 0.16, 0.3), y: 0.41, z: -0.3 },
-    { geo: box(0.11, 0.12, 0.11), y: 0.55, z: -0.3 },
-    // Flat hex disk, not a dish on a stalk: the plate's stalked dish is a tall
-    // circle that occludes the deck it sits over. Laid flat it still reads as
-    // the teleoperation link — the one thing every Operators machine needs —
-    // and gives the raider a plan token neither rover nor tank has.
-    { geo: cyl(0.17, 0.155, 0.055, 6), y: 0.645, z: -0.3, ry: 0.26 },
-    // ── transom deck, flush with the rail tops, with a flush vent ─────────
-    { geo: box(0.46, 0.07, 0.16), y: 0.505, z: -0.5 },
-    { geo: flatHex(0.1), y: 0.542, z: -0.5 },
+    // ── hull: one thick faceted slab, full dart planform ─────────────────
+    { geo: plate(HULL, 0.26), y: 0.33 },
+    // ── roof: closes the top, inset only enough to bevel ─────────────────
+    { geo: plate(ROOF, 0.12), y: 0.52 },
+    // ── prow: flush sensor hex on the nose deck. Nothing protrudes. ──────
+    { geo: flatHex(0.075), y: 0.581, z: 0.5 },
+    // ── aft power pack + transom vent, sunk into the roof line ───────────
+    { geo: box(0.42, 0.14, 0.3), y: 0.62, z: -0.34 },
+    { geo: box(0.42, 0.07, 0.14), y: 0.64, z: -0.5 },
+    { geo: flatHex(0.09), y: 0.677, z: -0.5 },
+    // ── dorsal turret, mid-aft: barbette + drum + blunt mantlet. Baked
+    //    facing +Z; no raider turret rig in entityUnits. ─────────────────
+    { geo: cyl(0.2, 0.22, 0.06, 6), y: 0.61, z: -0.02 }, // barbette ring
+    { geo: cyl(0.17, 0.19, 0.16, 6), y: 0.72, z: -0.02 }, // drum
+    // Mantlet has to break the drum's outline in *plan* or the turret reads as
+    // a hex nut from the match camera — that flat is the facing cue.
+    { geo: box(0.19, 0.13, 0.2), y: 0.71, z: 0.2 },
+    { geo: cyl(0.12, 0.13, 0.05, 6), y: 0.82, z: -0.02 }, // hatch cap
     // ── running gear: cross axles carry the wheels 0.16+ clear of the hull.
     //    Front axle sits well forward (z 0.48) so the nose overhang stays
     //    short — a long unsupported prow reads as a boat, not a buggy. ─────
@@ -388,6 +367,10 @@ export function makeTankGeo() {
   ]);
 }
 
+/**
+ * Shared / non-Ops air placeholder — straight-wing gunship. Ops air split into
+ * Interceptor + Bomber; keep this for other factions until they get own air.
+ */
 export function makeFlyerGeo() {
   return mergeParts([
     { geo: box(0.35, 0.25, 0.9), y: 0.3 },
@@ -404,25 +387,268 @@ export function makeFlyerGeo() {
   ]);
 }
 
-/** Ops Airpad product — same family as flyer for now; silhouette can diverge later. */
+/**
+ * Interceptor — Operators vacuum VTOL hover fighter (Airpad product).
+ *
+ * Rebuilt against `operators/interceptor.jpg`. The previous rev was a box
+ * fuselage with a cone taped on the nose and a wing bolted to its side, which
+ * is a different aircraft from the plate in every way that matters. The plate
+ * is a **lifting body**: there is no join between fuselage and wing, the nose
+ * is a long fairing that grows out of the centreline, and the machine's whole
+ * identity is the cranked delta plan plus two big ventral cones slung under it.
+ *
+ * Four things carry the read, in order of how much they cost to lose:
+ *
+ * 1. **Cranked delta, not a triangle.** A narrow strake runs most of the nose
+ *    before the leading edge breaks outboard into the wing. The kink is what
+ *    separates this from the scout, which is the other triangle-in-plan in the
+ *    Ops kit — the scout is a small arrowhead with a notched trailing edge and
+ *    no fuselage; this is a long cranked delta with a spine down the middle, a
+ *    boat-tail sticking out past the trailing edge, and a fin standing over it.
+ *    At 58px the fin and the ventral cones are the tiebreak, so neither is
+ *    decoration.
+ * 2. **The ventral cones are the signature.** Big (r 0.135), outboard at ±0.34,
+ *    tips down. On the plate they are the first thing you see. They are sized
+ *    to bottom out at unit y≈0.02 so an Airpad-parked interceptor still clears
+ *    the deck resting on its thrust — do not grow them without retuning
+ *    `PRODUCT_PARK.airpad.y`.
+ * 3. **One tall centreline fin.** The old twin stubs read as greeble at match
+ *    zoom. The plate has a single tall trapezoid and it is the only thing that
+ *    gives this airframe a height silhouette.
+ * 4. **Solid nose.** No canopy, no eye (LORE.md — Operators signal capability,
+ *    not alertness). The plate's forward booms are below the ~0.055 minimum
+ *    part gauge and are deliberately dropped rather than drawn as shimmer.
+ *
+ * Nothing on this airframe is a slab. The body is a `loftRings` stack, the wing
+ * carries a chamfered root, and the tip pods are hex cylinders — because a
+ * single extruded plate has vertical sides, and vertical sides are what made
+ * every earlier rev of this read as a brick with a point on it no matter how
+ * good the plan outline got. See `loftRings`.
+ *
+ * Main bells + wingtip pods match INTERCEPTOR_BELLS / INTERCEPTOR_RCS.
+ */
 export function makeInterceptorGeo() {
-  return makeFlyerGeo();
+  // Lifting body. The nose is *in* this outline, not a cone stuck on the end —
+  // the outer loft slices pull `sz` toward the pivot, which tapers the snout in
+  // profile as well as plan and is what makes it a fairing instead of a spike.
+  const BODY: [number, number][] = [
+    [0, 0.9],
+    [0.075, 0.4],
+    [0.13, -0.1],
+    [0.15, -0.4],
+    [0.13, -0.62],
+    [-0.13, -0.62],
+    [-0.15, -0.4],
+    [-0.13, -0.1],
+    [-0.075, 0.4],
+  ];
+  const WING: [number, number][] = [
+    [0, 0.92],
+    [0.1, 0.36],
+    [0.58, -0.36],
+    [0.6, -0.58],
+    [-0.6, -0.58],
+    [-0.58, -0.36],
+    [-0.1, 0.36],
+  ];
+  // Fin profile authored as [height, z]; rz=90° stands it up, thickness → X.
+  const fin = plate(
+    [
+      [0, 0.22],
+      [0, -0.24],
+      [0.44, -0.18],
+      [0.42, 0.02],
+    ],
+    0.06,
+  );
+
+  return mergeParts([
+    // ── cranked delta, chamfered: full-span skin + thickened root ────────
+    ...loftRings(
+      WING,
+      [
+        { y: 0.29, t: 0.05 },
+        { y: 0.335, t: 0.05, sx: 0.72, sz: 0.88 },
+      ],
+      -0.1,
+    ),
+    // ── lifting body: four slices, narrow → beam → narrow ────────────────
+    ...loftRings(
+      BODY,
+      [
+        { y: 0.32, t: 0.07, sx: 0.6, sz: 0.9 },
+        { y: 0.4, t: 0.11 },
+        { y: 0.49, t: 0.08, sx: 0.78, sz: 0.94 },
+        { y: 0.56, t: 0.07, sx: 0.46, sz: 0.82 },
+      ],
+      -0.1,
+    ),
+    { geo: sph(0.055), y: 0.59, z: 0.08 }, // flush sensor blister
+    // ── single tall fin ──────────────────────────────────────────────────
+    { geo: fin, y: 0.53, z: -0.24, rz: Math.PI / 2 },
+    // ── ventral lift cones, blended straight into the wing underside.
+    //    Bases sit inside the wing skin so there is no pylon box to read as
+    //    a peg; tips bottom out at y≈0.02 for the Airpad park. ────────────
+    { geo: cone(0.14, 0.3, 6), x: 0.34, y: 0.17, z: 0.02, rx: Math.PI },
+    { geo: cone(0.14, 0.3, 6), x: -0.34, y: 0.17, z: 0.02, rx: Math.PI },
+    // ── twin aft bells — mouths aft, matching INTERCEPTOR_BELLS ──────────
+    { geo: cone(0.085, 0.18, 6), x: 0.115, y: 0.42, z: -0.66, rx: Math.PI / 2 },
+    { geo: cone(0.085, 0.18, 6), x: -0.115, y: 0.42, z: -0.66, rx: Math.PI / 2 },
+    // ── wingtip pods: tapered hex cylinders, not boxes (RCS ports) ───────
+    { geo: cyl(0.05, 0.07, 0.3, 6), x: 0.585, y: 0.31, z: -0.44, rx: Math.PI / 2 },
+    { geo: cyl(0.05, 0.07, 0.3, 6), x: -0.585, y: 0.31, z: -0.44, rx: Math.PI / 2 },
+  ]);
 }
 
-/** Ops Bomber Works product — bulkier fuselage, wider wing, heavier bells. */
+/**
+ * Bomber — Operators heavy strike airframe (Bomber Works product).
+ *
+ * Rebuilt against `operators/bomber.jpg`. The previous rev was the interceptor's
+ * grammar scaled up — flat slab wing, pods tucked against the fuselage, twin
+ * stub verticals — and from above it read as a table. The plate is a different
+ * *class* of machine, and class is carried by four things the old geo had none
+ * of:
+ *
+ * 1. **Deep, blunt, round fuselage.** The plan outline is fat all the way to a
+ *    rounded snout, and the section is a five-slice `loftRings` stack, not an
+ *    extruded plate. This is the difference that mattered most: a slab body has
+ *    vertical flanks running its whole length and reads as a shipping crate no
+ *    matter how round you draw the plan. Bulk is the whole reason you can tell
+ *    this from the interceptor at 58px, and bulk means depth in *two* axes.
+ *    The snout is two tapering hex barrels rather than one flat-capped one, for
+ *    the same reason — a cylinder that stops dead is another flat face.
+ * 2. **Nacelles sit on the wing, well outboard.** Not pods hugging the tail.
+ *    Big Z-axis cylinders straddling the wing at ±0.56 with the intake proud of
+ *    the leading edge and the bell behind the trailing edge. This is the single
+ *    strongest silhouette cue on the plate and it is why BOMBER_BELLS moved off
+ *    the fuselage — the plumes have to leave from the nacelles or the whole read
+ *    collapses back to "big fighter".
+ * 3. **One tall centreline fin plus tailplane.** Same lesson as the interceptor:
+ *    twin stubs vanish, a single tall fin does not.
+ * 4. **Visible ordnance load.** Four munitions a side on a spanwise rack, plus
+ *    tip rails. Under-wing stores are the plate's loudest "this is the bomber"
+ *    statement, and they hang low enough to be seen from the match camera.
+ *
+ * Solid uncrewed nose — no canopy, no eye. Vacuum VTOL, no landing gear.
+ * Bomber Works parks one; `PRODUCT_PARK.bomber_works.y` has to clear the
+ * munitions (bottom ≈ 0.16 unit-local), not the wing.
+ */
 export function makeBomberGeo() {
+  // Underwing munition — one forward cone per station. Readable at match zoom;
+  // individual pylons would be under gauge, so a shared rack bar carries them.
+  const munition = (x: number) => ({
+    geo: cone(0.06, 0.32, 5),
+    x,
+    y: 0.22,
+    z: 0.04,
+    rx: Math.PI / 2,
+  });
+
+  // Fin profile authored as [height, z]; rz=90° stands it up, thickness → X.
+  const fin = plate(
+    [
+      [0, 0.26],
+      [0, -0.24],
+      [0.42, -0.2],
+      [0.4, 0.06],
+    ],
+    0.075,
+  );
+
+  const FUSE: [number, number][] = [
+    [0.22, 0.78],
+    [0.29, 0.46],
+    [0.3, -0.28],
+    [0.21, -0.74],
+    [-0.21, -0.74],
+    [-0.3, -0.28],
+    [-0.29, 0.46],
+    [-0.22, 0.78],
+  ];
+  // Cranked and tapered on purpose. A constant-chord wing plus a nacelle laid
+  // along it merges into one rectangle in plan, which is most of what "blocky"
+  // meant here — the tip has to lose chord for the outline to have any shape.
+  const WING: [number, number][] = [
+    [0.28, 0.38],
+    [0.72, 0.28],
+    [0.98, 0.04],
+    [0.98, -0.26],
+    [0.72, -0.4],
+    [0.28, -0.48],
+    [-0.28, -0.48],
+    [-0.72, -0.4],
+    [-0.98, -0.26],
+    [-0.98, 0.04],
+    [-0.72, 0.28],
+    [-0.28, 0.38],
+  ];
+
   return mergeParts([
-    { geo: box(0.48, 0.32, 1.15), y: 0.32 },
-    { geo: box(1.75, 0.1, 0.55), y: 0.3 },
-    { geo: cone(0.28, 0.5, 4), y: 0.32, z: 0.7, rx: Math.PI / 2 },
-    { geo: box(0.16, 0.28, 0.35), y: 0.48, z: -0.4 },
-    { geo: box(0.65, 0.08, 0.22), y: 0.58, z: -0.4 },
-    { geo: cone(0.11, 0.22, 6), x: 0.14, y: 0.32, z: -0.55, rx: Math.PI / 2 },
-    { geo: cone(0.11, 0.22, 6), x: -0.14, y: 0.32, z: -0.55, rx: Math.PI / 2 },
-    { geo: box(0.12, 0.09, 0.2), x: 0.78, y: 0.28, z: -0.05 },
-    { geo: box(0.12, 0.09, 0.2), x: -0.78, y: 0.28, z: -0.05 },
-    // ventral munition bay hint
-    { geo: box(0.28, 0.1, 0.45), y: 0.14, z: 0.05 },
+    // ── deep fuselage: five slices, belly → beam → crown ─────────────────
+    ...loftRings(FUSE, [
+      { y: 0.2, t: 0.1, sx: 0.6, sz: 0.9 },
+      { y: 0.29, t: 0.1, sx: 0.85, sz: 0.97 },
+      { y: 0.42, t: 0.18 },
+      { y: 0.55, t: 0.1, sx: 0.88, sz: 0.96 },
+      { y: 0.64, t: 0.1, sx: 0.62, sz: 0.88 },
+    ]),
+    // ── rounded snout: two tapering barrels, no flat cap. No canopy. ─────
+    { geo: cyl(0.2, 0.26, 0.18, 6), y: 0.42, z: 0.84, rx: Math.PI / 2 },
+    { geo: cyl(0.1, 0.2, 0.14, 6), y: 0.42, z: 1.0, rx: Math.PI / 2 },
+    { geo: sph(0.065), y: 0.71, z: 0.22 }, // flush sensor blister
+    // ── wide straight wing, squared tips, thickened root. Chord is
+    //    deliberately longer than the nacelle: at match zoom a wing the
+    //    nacelle covers end-to-end stops reading as a wing at all. ───────
+    ...loftRings(
+      WING,
+      [
+        { y: 0.4, t: 0.07 },
+        { y: 0.45, t: 0.05, sx: 0.66, sz: 0.84 },
+        { y: 0.35, t: 0.05, sx: 0.66, sz: 0.84 },
+      ],
+      -0.05,
+    ),
+    // ── nacelles straddling the wing at ±0.56: flared intake proud of the
+    //    leading edge, bell well behind the trailing edge ────────────────
+    { geo: cyl(0.18, 0.155, 0.07, 6), x: 0.56, y: 0.5, z: 0.34, rx: Math.PI / 2 },
+    { geo: cyl(0.18, 0.155, 0.07, 6), x: -0.56, y: 0.5, z: 0.34, rx: Math.PI / 2 },
+    { geo: cyl(0.155, 0.17, 0.56, 6), x: 0.56, y: 0.5, z: 0.02, rx: Math.PI / 2 },
+    { geo: cyl(0.155, 0.17, 0.56, 6), x: -0.56, y: 0.5, z: 0.02, rx: Math.PI / 2 },
+    // bells — mouths aft, matching BOMBER_BELLS
+    { geo: cone(0.15, 0.24, 6), x: 0.56, y: 0.5, z: -0.42, rx: Math.PI / 2 },
+    { geo: cone(0.15, 0.24, 6), x: -0.56, y: 0.5, z: -0.42, rx: Math.PI / 2 },
+    // ── single tall fin + tapered tailplane ──────────────────────────────
+    { geo: fin, y: 0.62, z: -0.5, rz: Math.PI / 2 },
+    {
+      geo: plate(
+        [
+          [0.1, -0.6],
+          [0.38, -0.68],
+          [0.38, -0.82],
+          [0.1, -0.8],
+          [-0.1, -0.8],
+          [-0.38, -0.82],
+          [-0.38, -0.68],
+          [-0.1, -0.6],
+        ],
+        0.07,
+      ),
+      y: 0.5,
+    },
+    // ── ordnance: spanwise rack + four stations a side ───────────────────
+    { geo: box(0.6, 0.07, 0.1), x: 0.6, y: 0.29, z: 0.0 },
+    { geo: box(0.6, 0.07, 0.1), x: -0.6, y: 0.29, z: 0.0 },
+    munition(0.36),
+    munition(0.52),
+    munition(0.68),
+    munition(0.84),
+    munition(-0.36),
+    munition(-0.52),
+    munition(-0.68),
+    munition(-0.84),
+    // ── wingtip rails: tapered hex barrels (also the RCS ports) ──────────
+    { geo: cyl(0.055, 0.075, 0.34, 6), x: 0.98, y: 0.36, z: -0.08, rx: Math.PI / 2 },
+    { geo: cyl(0.055, 0.075, 0.34, 6), x: -0.98, y: 0.36, z: -0.08, rx: Math.PI / 2 },
   ]);
 }
 

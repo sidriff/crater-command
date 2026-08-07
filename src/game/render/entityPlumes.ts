@@ -10,8 +10,12 @@ import * as THREE from "three";
 import type { RaceId } from "../sim/types";
 import type { UnitSmooth } from "./entityTypes";
 import {
+  BOMBER_BELLS,
+  BOMBER_RCS,
   FLYER_BELLS,
   FLYER_RCS,
+  INTERCEPTOR_BELLS,
+  INTERCEPTOR_RCS,
   SCOUT_BELLS,
   SCOUT_RCS,
 } from "./unitGeos";
@@ -55,6 +59,30 @@ export const FLYER_RIG: PlumeRig = {
   rcsW: 0.024,
   rcsLen: 0.07,
   rcsGain: 0.13,
+};
+
+/** Interceptor — compact fighter; mains match the twin aft bells. */
+export const INTERCEPTOR_RIG: PlumeRig = {
+  bells: INTERCEPTOR_BELLS,
+  rcs: INTERCEPTOR_RCS,
+  bellW: 0.05,
+  bellLen: 0.15,
+  bellGain: 0.32,
+  rcsW: 0.024,
+  rcsLen: 0.07,
+  rcsGain: 0.14,
+};
+
+/** Bomber — heavier pods, slightly fatter plumes. */
+export const BOMBER_RIG: PlumeRig = {
+  bells: BOMBER_BELLS,
+  rcs: BOMBER_RCS,
+  bellW: 0.062,
+  bellLen: 0.16,
+  bellGain: 0.28,
+  rcsW: 0.026,
+  rcsLen: 0.08,
+  rcsGain: 0.12,
 };
 
 /**

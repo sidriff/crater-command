@@ -151,6 +151,7 @@ export function disposePacks(p: MeshPacks) {
     b.depotStaged,
     b.barracksStaged,
     b.airpadStaged,
+    b.bomberWorksStaged,
     b.command,
     b.accent,
     b.crystalSpike,
@@ -230,7 +231,7 @@ export const MESHES: readonly MeshDef[] = [
     faction: "operators",
     unitTier: 2,
     parts: (p) => [p.units.interceptor],
-    note: "Ops Airpad product. Geo aliases flyer until silhouettes diverge.",
+    note: "Ops Airpad product — own VTOL fighter geo (not flyer).",
   },
   {
     id: "u:bomber",
@@ -241,7 +242,7 @@ export const MESHES: readonly MeshDef[] = [
     faction: "operators",
     unitTier: 3,
     parts: (p) => [p.units.bomber],
-    note: "Ops Bomber Works product. Bulkier airframe.",
+    note: "Ops Bomber Works product — fat airframe + munitions; not flyer.",
   },
 
   // ── Units · Shared (multi-race / transitional) ─────────
@@ -455,6 +456,28 @@ export const MESHES: readonly MeshDef[] = [
     unitTier: 2,
     parts: (p) => [p.buildings.airpadStaged],
     note: "No landing gear — an Operators airframe rests on its thrust.",
+  },
+  {
+    id: "b:bomber_works",
+    label: "Bomber Works",
+    section: "Buildings",
+    crease: 18,
+    concept: "bomber_works",
+    faction: "operators",
+    unitTier: 3,
+    parts: (p) => [p.buildings.bomberWorksStaged],
+    note: "Match still aliases airpad solid; staged parks a bomber for mesh-lab chrome.",
+  },
+  {
+    id: "b:null_lattice",
+    label: "Null Lattice",
+    section: "Buildings",
+    crease: 18,
+    concept: "null_lattice",
+    faction: "operators",
+    unitTier: 3,
+    parts: (p) => [p.buildings.dome],
+    note: "Match aliases habitat dome until a lattice geo exists — plate is open wireframe octahedron.",
   },
 
   // ── Shared buildings / props ───────────────────────────

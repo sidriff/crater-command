@@ -7,8 +7,10 @@
  *   /?lab=mesh&mesh=scout
  *   /?lab=readability
  *   /?lab=concept&concept=rover
+ *   /?lab=dispatch&dispatch=scout_works
  *
- * Runtime API: window.ccLabs.openMesh("u:scout") · openConcept("rover") · openLab("concept")
+ * Runtime API: window.ccLabs.openMesh("u:scout") · openConcept("rover") ·
+ *   openDispatch("scout_works") · openLab("dispatch")
  */
 import type { Lab, LabContext } from "./lab";
 import { LeverRegistry, mountLeverPanel } from "./levers";
@@ -17,6 +19,12 @@ import {
   makeConceptLab,
   resolveConceptId,
 } from "./labs/concept/index";
+import {
+  getDispatchLabHandle,
+  listDispatchCatalog,
+  makeDispatchLab,
+  resolveDispatchId,
+} from "./labs/dispatch/index";
 import {
   getMeshLabHandle,
   listMeshCatalog,
@@ -31,6 +39,7 @@ const LAB_FACTORIES: Array<() => Lab> = [
   makeReadabilityLab,
   makeMeshLab,
   makeConceptLab,
+  makeDispatchLab,
 ];
 const ACTIVE_KEY = "crater-labs:active";
 
@@ -134,6 +143,7 @@ function activate(factory: () => Lab) {
     mesh: lab.id === "mesh" ? prev.mesh : null,
     concept: lab.id === "concept" ? prev.concept : null,
     board: lab.id === "readability" ? prev.board : null,
+    dispatch: lab.id === "dispatch" ? prev.dispatch : null,
   });
   blurbEl.textContent = lab.blurb;
   levers.register(lab.levers);
@@ -190,18 +200,34 @@ function openConcept(raw: string): boolean {
   return getConceptLabHandle()?.load(id) ?? false;
 }
 
+function openDispatch(raw: string): boolean {
+  const id = resolveDispatchId(raw);
+  if (!id) return false;
+  writeLabQuery({ lab: "dispatch", dispatch: id });
+  if (active?.id !== "dispatch") {
+    activate(makeDispatchLab);
+    return getDispatchLabHandle()?.current() === id;
+  }
+  return getDispatchLabHandle()?.load(id) ?? false;
+}
+
 /** Public API for agents / console — no UI clicking required. */
 window.ccLabs = {
   lab: () => active?.id ?? null,
   openLab,
   openMesh,
   openConcept,
+  openDispatch,
   listMeshes: () => listMeshCatalog(),
+  listDispatches: () => listDispatchCatalog(),
   listLabs: () => LAB_FACTORIES.map((f) => f().id),
   mesh: () => getMeshLabHandle()?.current() ?? null,
   meshFeedback: () => getMeshLabHandle()?.exportFeedback() ?? null,
   concept: () => getConceptLabHandle()?.current() ?? null,
   conceptFeedback: () => getConceptLabHandle()?.exportFeedback() ?? null,
+  dispatch: () => getDispatchLabHandle()?.current() ?? null,
+  dispatchFeedback: () => getDispatchLabHandle()?.exportFeedback() ?? null,
+  replayDispatch: () => getDispatchLabHandle()?.replay(),
 };
 
 function loop(now: number) {
@@ -220,7 +246,9 @@ const fromUrl =
       ? "mesh"
       : q.concept && resolveConceptId(q.concept)
         ? "concept"
-        : null;
+        : q.dispatch && resolveDispatchId(q.dispatch)
+          ? "dispatch"
+          : null;
 const want = fromUrl ?? rememberedId();
 const start = (want && factoryById(want)) || LAB_FACTORIES[0]!;
 activate(start);
@@ -241,7 +269,9 @@ window.addEventListener("popstate", () => {
         ? "mesh"
         : nq.concept && resolveConceptId(nq.concept)
           ? "concept"
-          : active?.id;
+          : nq.dispatch && resolveDispatchId(nq.dispatch)
+            ? "dispatch"
+            : active?.id;
   if (labId && labId !== active?.id) {
     const f = factoryById(labId);
     if (f) activate(f);
@@ -253,6 +283,9 @@ window.addEventListener("popstate", () => {
   if (active?.id === "concept" && nq.concept) {
     getConceptLabHandle()?.load(nq.concept);
   }
+  if (active?.id === "dispatch" && nq.dispatch) {
+    getDispatchLabHandle()?.load(nq.dispatch);
+  }
 });
 
 declare global {
@@ -262,12 +295,17 @@ declare global {
       openLab(id: string): boolean;
       openMesh(raw: string): boolean;
       openConcept(raw: string): boolean;
+      openDispatch(raw: string): boolean;
       listMeshes(): { id: string; label: string; section: string }[];
+      listDispatches(): { id: string; label: string; status: string }[];
       listLabs(): string[];
       mesh(): string | null;
       meshFeedback(): string | null;
       concept(): string | null;
       conceptFeedback(): string | null;
+      dispatch(): string | null;
+      dispatchFeedback(): string | null;
+      replayDispatch(): void;
     };
   }
 }

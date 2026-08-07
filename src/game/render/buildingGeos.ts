@@ -11,6 +11,7 @@ import {
   cyl,
   flatHex,
   flatRing,
+  geoDome,
   kitFromSpecs,
   materializePart,
   mergeGeos,
@@ -75,6 +76,12 @@ export type ProductPark = {
   z: number;
   yaw: number;
   scale: number;
+  /**
+   * Nose-up radians, for a product parked on something that isn't level (the
+   * Depot ramp). Positive = nose up, matching `placeOnSurface`. A flat unit on
+   * a visible slope is worse than no slope at all — it reads as clipping.
+   */
+  pitch?: number;
 };
 
 /** buildScale-relative: ROVER_SCALE 0.57 / 1.15, other units 1.05 / 1.15. */
@@ -82,26 +89,38 @@ const PARK_ROVER_SCALE = 0.4957;
 const PARK_UNIT_SCALE = 0.913;
 
 export const PRODUCT_PARK: Partial<Record<BuildingKind, ProductPark>> = {
-  // Rover nose-out on the apron, guide rails running back into the bay.
-  // z pulled in from 0.28 — the rover chassis is 1.59 deep, so any further
-  // forward and the tail hitch hangs off the back of the deck.
-  depot: { unit: "worker", x: 0, y: 0.21, z: 0.24, yaw: 0, scale: PARK_ROVER_SCALE },
-  // Raider in the stall, wheels on the hardstand rails (top y 0.19), nose and
-  // gun out over the front lip. z is pinned by the *tail*, not the nose: the
-  // raider is 1.585 long in model units (rear tyre -0.62 → muzzle 0.965) which
-  // is 1.447 at park scale, against a 1.34 deck, so something has to hang off.
-  // z 0.04 leaves 0.034 between the rear tyre and the blast wall's inner face
-  // at -0.56, and puts 0.251 of nose past the deck edge. That overhang is
-  // deliberate — "nosed out, ready" — and it is mostly barrel.
-  // y 0.19 is the hardstand top; the hex wheels rest on a flat, so the tyres
-  // touch down 0.025 lower than the origin, same as every Ops wheeled unit.
+  // Rover nose-out and nose-*down* on the drive-up ramp. y is the ramp's top
+  // surface directly under the origin (wheel bottoms sit at unit y=0) and
+  // pitch matches the ramp slope, so all four wheels track the deck instead of
+  // one pair hanging in air. z 0.34 is mid-ramp: far enough forward that the
+  // bay roof never falls across the rover from the match camera, far enough
+  // back that the chassis (~0.79 long at park scale) stays on the slope.
+  // Any change to DEPOT_DECK_TOP / the ramp span moves all three numbers.
+  depot: {
+    unit: "worker",
+    x: 0,
+    y: 0.23,
+    z: 0.34,
+    yaw: 0,
+    scale: PARK_ROVER_SCALE,
+    pitch: -0.33,
+  },
+  // Raider in the stall, wheels on the hardstand rails (top y 0.19), nose out
+  // over the front lip. z is pinned by the *tail*, not the nose: the raider is
+  // ~1.46 long in model units (rear tyre -0.62 → instrument bar ~0.82) which is
+  // ~1.33 at park scale, against a 1.34 deck — tight but the blunt prow still
+  // peeks past the apron. z 0.04 leaves ~0.034 between the rear tyre and the
+  // blast wall's inner face at -0.56. y 0.19 is the hardstand top; hex wheels
+  // rest on a flat, so the tyres touch down 0.025 lower than the origin, same
+  // as every Ops wheeled unit.
   barracks: { unit: "raider", x: 0, y: 0.19, z: 0.04, yaw: 0, scale: PARK_UNIT_SCALE },
   // Ops Airpad parks an Interceptor over the landing ring (thrust rest, no gear).
-  // y 0.28 is origin height: deck top is 0.18, so the flyer clears the apron by
-  // a hand's width (fuselage bottom ~0.16 unit-local → ~0.44 world after park
-  // scale). If the apron height changes, retune this.
+  // y 0.28 is origin height: deck top is 0.18; ventral cone tips sit ~0.03
+  // unit-local so they clear the apron after park scale. If the apron height
+  // or ventral cones change, retune this.
   airpad: { unit: "interceptor", x: 0, y: 0.28, z: 0.02, yaw: 0, scale: PARK_UNIT_SCALE },
-  // Bomber Works parks a Bomber (bulkier airframe).
+  // Bomber Works parks a Bomber (bulkier airframe). y 0.32 clears underwing
+  // munitions (~0.115 unit-local bottom) off the deck.
   bomber_works: { unit: "bomber", x: 0, y: 0.32, z: 0.02, yaw: 0, scale: PARK_UNIT_SCALE },
 };
 
@@ -426,22 +445,74 @@ export function makeBuildingGeos() {
   ]);
   const extractor = extractorKit.solid;
 
-  // Operators Worker Depot — garage bay at the back, rover on the front apron.
-  // Same doctrine as the Scout Works: an Operators producer is a dispatch
-  // station, so its product is parked in the open where you can read it. Body
-  // is pushed to -Z and the front half of the deck is left clear as apron.
+  /**
+   * Operators Worker Depot — garage bay aft, drive-up ramp forward.
+   *
+   * Same doctrine as the Scout Works: an Operators producer is a dispatch
+   * station, so its product is parked in the open where you can read it. Concept
+   * plate `operators/depot.jpg`: garage bay mouth facing +Z, rover staged on a
+   * sloping drive-up ramp from the front lip up onto the bay floor — not thin
+   * guide rails (those read as guardrails at match zoom).
+   *
+   * Match-camera doctrine (~40–55° down):
+   * 1. **Ramp, not rails.** The first pass at this laid a near-flat plank on the
+   *    ground and flanked it with two low kerb pads. From the match camera the
+   *    kerbs were the only thing with any height, so the whole assembly read as
+   *    *guardrails* — the exact note this geo exists to answer. A ramp reads as a
+   *    ramp because of three things together, and none of them is optional:
+   *    a deck that is **raised enough to need one** (top 0.30, not 0.19), a
+   *    **slope you can see in profile** (~17°), and **solid triangular side
+   *    cheeks** that close the wedge. The cheeks are the load-bearing cue: a
+   *    tilted plate alone is ambiguous at 58px, a filled wedge never is. No kerbs.
+   * 2. **Garage silhouette.** Side walls + rear wall + lipped roof over the bay;
+   *    service stack and dispatch mast on the roof.
+   * 3. **Footprint** near scaffold family ±0.7–0.8. Nothing thinner than ~0.07.
+   *
+   * PRODUCT_PARK.depot parks the rover on the ramp surface — retune y/z if the
+   * ramp plate moves (wheel bottoms are unit y=0; park.y = surface under origin).
+   */
+  // Ramp geometry, kept as named constants because the park point and the side
+  // cheeks all have to agree with the deck: any change here moves the rover.
+  const DEPOT_DECK_TOP = 0.30;
+  const DEPOT_RAMP_FOOT_Z = 0.86; // ground end (+Z)
+  const DEPOT_RAMP_HEAD_Z = -0.02; // meets the deck just inside the bay mouth
+  const DEPOT_RAMP_RUN = DEPOT_RAMP_FOOT_Z - DEPOT_RAMP_HEAD_Z;
+  const DEPOT_RAMP_TILT = Math.atan2(DEPOT_DECK_TOP, DEPOT_RAMP_RUN); // ≈0.33 rad
+  const DEPOT_RAMP_LEN = Math.hypot(DEPOT_RAMP_RUN, DEPOT_DECK_TOP);
+  const DEPOT_RAMP_HALF_W = 0.48; // seats the parked rover (chassis ~0.8 × scale)
+
+  // Cheek profile authored as [height, z]; rz≈90° stands it up, thickness → X.
+  const depotCheek = () =>
+    plate(
+      [
+        [0.02, DEPOT_RAMP_FOOT_Z],
+        [0.02, DEPOT_RAMP_HEAD_Z],
+        [DEPOT_DECK_TOP, DEPOT_RAMP_HEAD_Z],
+      ],
+      0.1,
+    );
+
   const depotKit = kitFromSpecs([
-    { geo: box(1.35, 0.18, 1.3), y: 0.12 }, // apron deck
-    { geo: box(0.14, 0.62, 0.62), x: 0.55, y: 0.52, z: -0.34 }, // bay walls
-    { geo: box(0.14, 0.62, 0.62), x: -0.55, y: 0.52, z: -0.34 },
-    { geo: box(1.24, 0.62, 0.12), y: 0.52, z: -0.59 }, // rear wall
-    { geo: box(1.35, 0.1, 0.78), y: 0.88, z: -0.28 }, // bay roof, lipped over the apron
-    { geo: cyl(0.18, 0.24, 0.34, 6), x: -0.42, y: 1.05, z: -0.5 }, // service stack
-    { geo: box(0.06, 0.5, 0.06), x: 0.5, y: 1.15, z: -0.5 }, // dispatch mast
-    // Guide rails run out of the bay — same visual grammar as the launch rail
-    { geo: box(0.06, 0.05, 0.66), x: 0.3, y: 0.235, z: 0.3 },
-    { geo: box(0.06, 0.05, 0.66), x: -0.3, y: 0.235, z: 0.3 },
-    { geo: box(1.24, 0.06, 0.06), y: 0.24, z: 0.6 }, // apron lip
+    // Bay floor / main apron under the garage (top = DEPOT_DECK_TOP)
+    { geo: box(1.35, 0.3, 1.0), y: 0.15, z: -0.14 },
+    // Garage bay at -Z
+    { geo: box(0.14, 0.62, 0.62), x: 0.55, y: 0.63, z: -0.34 }, // bay walls
+    { geo: box(0.14, 0.62, 0.62), x: -0.55, y: 0.63, z: -0.34 },
+    { geo: box(1.24, 0.62, 0.12), y: 0.63, z: -0.59 }, // rear wall
+    { geo: box(1.35, 0.1, 0.78), y: 0.99, z: -0.28 }, // bay roof, lipped over the apron
+    { geo: cyl(0.18, 0.24, 0.34, 6), x: -0.42, y: 1.16, z: -0.5 }, // service stack
+    { geo: box(0.08, 0.5, 0.08), x: 0.5, y: 1.26, z: -0.5 }, // dispatch mast
+    // Drive-up ramp: sloping deck, ground at +Z up to the apron top.
+    // rx > 0 lowers the +Z end.
+    {
+      geo: box(DEPOT_RAMP_HALF_W * 2, 0.1, DEPOT_RAMP_LEN),
+      y: DEPOT_DECK_TOP * 0.5,
+      z: (DEPOT_RAMP_FOOT_Z + DEPOT_RAMP_HEAD_Z) * 0.5,
+      rx: DEPOT_RAMP_TILT,
+    },
+    // Side cheeks — the filled wedge that makes it a ramp and not a plank.
+    { geo: depotCheek(), x: DEPOT_RAMP_HALF_W, rz: Math.PI / 2 },
+    { geo: depotCheek(), x: -DEPOT_RAMP_HALF_W, rz: Math.PI / 2 },
   ]);
   const depot = depotKit.solid;
 
@@ -491,37 +562,46 @@ export function makeBuildingGeos() {
   /**
    * Operators Habitat Dome — fragile geodesic glass house (Red Mars).
    *
-   * Concept plate `operators/dome.jpg` + catalog id "dome": low scaffold ring,
-   * transparent lattice shell, thin structural ribs. This is the ONE deliberate
-   * see-through surface in the kit — the ico lattice sells the soft-spot card
+   * Concept plate `operators/dome.jpg` + catalog id "dome": true geodesic
+   * **hemisphere** on a low multi-bay scaffold ring. This is the ONE deliberate
+   * see-through surface in the kit — the shell lattice sells the soft-spot card
    * (cheap to snipe, painful when cap-starved). Do not solid-face this shell.
    *
    * Match-camera doctrine (~40–55° down, ~58px plan):
-   * 1. **Silhouette is "round lattice on a ring."** Old mesh put a solid 1.1
-   *    deck under the ico and two skinny posts — plan read as a filled square
-   *    with a ball on it, and the ring was finer than every other Ops frame.
-   *    Ring members are now depot wall gauge (~0.13–0.14); open rectangular
-   *    bays match the concept skirt and leave daylight through the base.
-   * 2. **Fewer parts.** Eight ring bays + inner seat + shell. No door greeble,
-   *    no free-standing posts — concept is pure dome + scaffold ring.
-   * 3. **Footprint** hugs scaffoldDeck (±0.775): ring outer ≈ ±0.785 (skirt
-   *    lip). Nothing thinner than ~0.07 model units.
+   * 1. **Silhouette is "bowl cut of geodesic on a ring," not a ball.** A full
+   *    icosahedron scaled Y*0.7 read as a squashed balloon. Shell is an upper
+   *    hemisphere with a clear apex; base sits on the ring top, not floating
+   *    past the skirt.
+   * 1b. **The shell is a sliced icosphere, never a lat/long hemisphere.** The
+   *    `SphereGeometry` version of this read as vertical *strips* — its quads
+   *    split into near-coplanar triangles, so the crease pass culled every
+   *    diagonal and left only rings and meridians. `geoDome` slices an icosphere
+   *    instead: every strut survives, and the triangulation is the whole point
+   *    of drawing a geodesic. Detail stays at 1 (see `geoDome`).
+   * 2. **Scaffold ring.** Open rectangular bays around the perimeter (depot wall
+   *    gauge ~0.12–0.14), low height, outer radius hugging scaffoldDeck ±0.78.
+   *    Inner seat/sill under the glass base so the dome rests on the ring.
+   * 3. **Fewer parts.** Ring bays + seat + shell. No door greeble.
+   * 4. **Footprint** hugs scaffoldDeck (±0.775). Nothing thinner than ~0.07.
    */
-  // Shell max XZ radius ≤ ring outer so the scaffold reads as a skirt in plan
-  // (concept: dome on the ring, not hanging past it).
-  const domeShell = new THREE.IcosahedronGeometry(0.74, 1);
-  domeShell.scale(1, 0.7, 1);
-  // Lower lattice on ring top (~0.36); crown ≈ 0.36 + 2*0.74*0.7 ≈ 1.40.
-  domeShell.translate(0, 0.88, 0);
-
   const DOME_RING_R = 0.72; // panel centerline → outer ≈ ±0.785
   const DOME_BEAM = 0.13; // depot frame gauge (bay walls 0.14, core beams 0.15)
-  const DOME_RING_H = 0.3;
-  const DOME_RING_Y0 = 0.06;
-  const DOME_N = 8;
+  const DOME_RING_H = 0.28;
+  const DOME_RING_Y0 = 0.05;
+  const DOME_RING_TOP = DOME_RING_Y0 + DOME_RING_H; // shell base / seat top
+  const DOME_SHELL_R = 0.70; // ≤ ring outer so the skirt reads in plan
+  const DOME_N = 10; // multi-bay skirt (concept ~10–12 open frames)
+
+  // Sliced icosphere. Cut a touch above the equator: the plate's dome is a
+  // little shallower than a half-ball, and the shorter skirt stops the lowest
+  // struts from diving behind the ring where they read as clutter.
+  const domeShell = geoDome(DOME_SHELL_R, 1, DOME_SHELL_R * 0.12);
+  // Base on ring top; crown ≈ ring top + 0.88·R ≈ 0.95 (clear apex, not a ball).
+  domeShell.translate(0, DOME_RING_TOP, 0);
+
   const domeParts: PartSpec[] = [];
-  // Open rectangular scaffold bays — EdgesGeometry of each thin box reads as
-  // a wireframe cell, same grammar as the concept plate's skirt frames.
+  // Open rectangular scaffold bays — EdgesGeometry of each box reads as a
+  // wireframe cell, same grammar as the concept plate's skirt frames.
   for (let i = 0; i < DOME_N; i++) {
     const a = (i + 0.5) * ((Math.PI * 2) / DOME_N);
     const chord = 2 * DOME_RING_R * Math.sin(Math.PI / DOME_N);
@@ -534,10 +614,9 @@ export function makeBuildingGeos() {
     });
   }
   // Inner seat — short sill the glass rests on (not a filled deck).
-  // Top meets ring top / shell base (~0.36) so the lattice doesn't float.
   domeParts.push({
-    geo: cyl(0.52, 0.58, 0.14, 8),
-    y: DOME_RING_Y0 + DOME_RING_H - 0.07,
+    geo: cyl(0.54, 0.60, 0.12, 10),
+    y: DOME_RING_TOP - 0.06,
   });
   domeParts.push({ geo: domeShell, y: 0 });
   const domeKit = kitFromSpecs(domeParts);
@@ -565,8 +644,8 @@ export function makeBuildingGeos() {
    *    posts and a cap rail with daylight between them. The old 0.70 slab walls
    *    were taller than the parked raider's deck line and hid its flanks from the
    *    match camera, which is the roof mistake again, just sideways. The cap rail
-   *    tops out at 0.71 against the parked raider's 0.80, so the gun, the trough
-   *    and the uplink disk all clear the wall line.
+   *    tops out at 0.71 against the parked raider's cabin/dish line, so the
+   *    closed deck, cabin and stalked dish all clear the wall line.
    * 3. **Ordnance lives outboard, in pairs.** The old single rack hung in mid-air
    *    off the left wall — unsupported, and asymmetric, which Operators are not.
    *    Two magazines now bolt to the outside of the sills on deck-edge brackets.
@@ -799,31 +878,27 @@ export function makeBuildingGeos() {
 
   /**
    * Logistics Hub (sim kind `factory` — Ops aliases this geo). Cargo yard on an
-   * open square scaffold: flat-roofed block aft, racked cargo cans clamped on the
-   * forward apron, one rigid transfer gantry, radio mast on the roof.
+   * open square scaffold: faceted flat-roofed warehouse aft, racked cargo crates
+   * on the forward apron, rigid transfer gantry with a claw, radio mast + dish.
    *
-   * Replaces the old solid barn blob (stacked boxes, no daylight, no cargo read).
-   * Match camera looks down, so:
+   * Concept plate `operators/logistics.jpg` + catalog: "Logistics hub on an open
+   * square scaffold: flat-roofed block, racked cargo cans clamped down, a rigid
+   * transfer gantry, radio mast." Match camera looks down, so:
    *
-   * 1. **Scaffold is a frame, not a brick.** Four corner posts, perimeter rails,
-   *    two mid joists — daylight in the four bays. A solid pad would fill plan
-   *    like the depot apron and cost the hollow-frame Ops identity.
-   * 2. **Cans live in the open.** The warehouse block sits on -Z; the forward
-   *    half of the pad is a shallow rack deck with a 2×3 of cargo cans and two
-   *    clamp bars. From above you read cans first, then the gantry spanning them.
-   * 3. **One rigid gantry, not a multi-joint crane.** Column + boom + hoist head
-   *    over the can lane. Concept plate has an articulated arm with a claw; at
-   *    icon scale that collapses into noise, so this is the rigid transfer
-   *    silhouette the catalog asks for.
-   * 4. **Warehouse is a low flat-roofed block**, not a second tower. Slight
-   *    forward bevel (loading face) and a roof plate a hair larger than the body
-   *    so it reads as a lid, not a cube. Mast and dish sit on the roof — never
-   *    over the cans.
+   * 1. **Scaffold is a frame, not a brick.** Corner posts, perimeter rails, mid
+   *    joists — daylight in the bays. Distinct from depot's solid apron.
+   * 2. **Warehouse is a faceted angular block** (stacked/chamfered mass), aft on
+   *    -Z, flat or shallow-pitch roof — not a plain cube or second tower.
+   * 3. **Clear crate grid** on the forward apron: body + slight lid thickness,
+   *    2×3, readable as cargo first from above.
+   * 4. **Rigid transfer arm + claw.** Column + boom + two-prong grabber over the
+   *    cans. Concept has an articulated arm; at icon scale multi-joint spaghetti
+   *    collapses, so this is the rigid transfer silhouette with a visible claw.
+   * 5. **Radio mast** lattice-ish (spar + crossed braces) + dish on the roof —
+   *    never over the cans.
    *
-   * Footprint stays inside ~±0.78 (scaffold family). Nothing thinner than 0.07
-   * model units (≈0.08 world at build scale 1.15). Distinct from depot (garage
-   * + apron rails), barracks (roofless stall), command (tiered solid), refinery
-   * (process stacks).
+   * Footprint ~±0.78. Nothing thinner than 0.07. Distinct from depot (garage +
+   * ramp), barracks (roofless stall), command, refinery.
    */
   const factoryKit = kitFromSpecs([
     // ── open square scaffold ─────────────────────────────────────────────
@@ -838,50 +913,60 @@ export function makeBuildingGeos() {
     { geo: box(1.44, 0.08, 0.1), y: 0.32, z: 0.18 }, // mid joists — daylight bays
     { geo: box(1.44, 0.08, 0.1), y: 0.32, z: -0.22 },
     { geo: box(0.1, 0.08, 1.44), x: 0, y: 0.32 },
-    // short diagonal braces on the front face so the pad doesn't read as a
-    // floating picture frame from the side
     { geo: box(0.08, 0.22, 0.08), x: 0.36, y: 0.18, z: 0.72, rz: 0.55 },
     { geo: box(0.08, 0.22, 0.08), x: -0.36, y: 0.18, z: 0.72, rz: -0.55 },
 
-    // ── flat-roofed warehouse block (aft) ────────────────────────────────
-    { geo: box(1.18, 0.52, 0.7), y: 0.66, z: -0.28 }, // body
-    { geo: box(1.0, 0.22, 0.16), y: 0.52, z: 0.14 }, // loading face toward cans
-    { geo: box(1.26, 0.09, 0.78), y: 0.965, z: -0.28 }, // flat roof plate
-    // small equipment shoulder on the roof (breaks the pure rectangle in plan)
-    { geo: box(0.32, 0.12, 0.28), x: -0.38, y: 1.07, z: -0.42 },
+    // ── faceted warehouse block (aft) ────────────────────────────────────
+    // Stacked mass with forward chamfer + stepped roof so plan/side read
+    // angular (concept beveled hull), not a single barn cube.
+    { geo: box(1.16, 0.48, 0.68), y: 0.64, z: -0.32 }, // main body
+    { geo: box(1.02, 0.28, 0.22), y: 0.58, z: 0.08 }, // loading face toward cans
+    { geo: box(0.92, 0.22, 0.16), y: 0.78, z: 0.02, rx: -0.35 }, // forward bevel plate
+    { geo: box(1.08, 0.14, 0.58), y: 0.95, z: -0.30 }, // roof shoulder
+    { geo: box(0.92, 0.12, 0.48), y: 1.08, z: -0.34 }, // flat roof cap
+    { geo: box(0.30, 0.1, 0.26), x: -0.36, y: 1.18, z: -0.42 }, // roof equipment hump
 
-    // ── cargo can rack (forward apron) ───────────────────────────────────
-    { geo: box(1.1, 0.08, 0.58), y: 0.4, z: 0.38 }, // rack deck
-    // 2×3 cans — slightly staggered heights so the grid doesn't flatline
-    { geo: box(0.26, 0.18, 0.22), x: -0.34, y: 0.53, z: 0.24 },
-    { geo: box(0.26, 0.18, 0.22), x: 0, y: 0.53, z: 0.24 },
-    { geo: box(0.26, 0.18, 0.22), x: 0.34, y: 0.53, z: 0.24 },
-    { geo: box(0.26, 0.2, 0.22), x: -0.34, y: 0.54, z: 0.5 },
-    { geo: box(0.26, 0.18, 0.22), x: 0, y: 0.53, z: 0.5 },
-    { geo: box(0.26, 0.2, 0.22), x: 0.34, y: 0.54, z: 0.5 },
-    // clamp bars — long straps pinning the cans to the rack
-    { geo: box(1.02, 0.07, 0.08), y: 0.66, z: 0.24 },
-    { geo: box(1.02, 0.07, 0.08), y: 0.66, z: 0.5 },
+    // ── cargo crate grid (forward apron) ─────────────────────────────────
+    { geo: box(1.12, 0.08, 0.58), y: 0.4, z: 0.38 }, // rack deck
+    // 2×3 crates — body + lid lip so they read as cans, not featureless boxes
+    { geo: box(0.26, 0.14, 0.20), x: -0.34, y: 0.51, z: 0.24 },
+    { geo: box(0.28, 0.07, 0.22), x: -0.34, y: 0.615, z: 0.24 }, // lid
+    { geo: box(0.26, 0.14, 0.20), x: 0, y: 0.51, z: 0.24 },
+    { geo: box(0.28, 0.07, 0.22), x: 0, y: 0.615, z: 0.24 },
+    { geo: box(0.26, 0.14, 0.20), x: 0.34, y: 0.51, z: 0.24 },
+    { geo: box(0.28, 0.07, 0.22), x: 0.34, y: 0.615, z: 0.24 },
+    { geo: box(0.26, 0.15, 0.20), x: -0.34, y: 0.515, z: 0.5 },
+    { geo: box(0.28, 0.07, 0.22), x: -0.34, y: 0.625, z: 0.5 },
+    { geo: box(0.26, 0.14, 0.20), x: 0, y: 0.51, z: 0.5 },
+    { geo: box(0.28, 0.07, 0.22), x: 0, y: 0.615, z: 0.5 },
+    { geo: box(0.26, 0.15, 0.20), x: 0.34, y: 0.515, z: 0.5 },
+    { geo: box(0.28, 0.07, 0.22), x: 0.34, y: 0.625, z: 0.5 },
+    // clamp bars pinning the crate rows
+    { geo: box(1.02, 0.07, 0.08), y: 0.69, z: 0.24 },
+    { geo: box(1.02, 0.07, 0.08), y: 0.70, z: 0.5 },
     // end stops at the rack lip
     { geo: box(0.08, 0.12, 0.52), x: 0.52, y: 0.5, z: 0.38 },
     { geo: box(0.08, 0.12, 0.52), x: -0.52, y: 0.5, z: 0.38 },
 
-    // ── rigid transfer gantry ────────────────────────────────────────────
-    // Column on the starboard edge of the can yard, boom spanning over the
-    // middle lane, short hoist head at the free end.
-    { geo: box(0.12, 0.78, 0.12), x: 0.58, y: 0.84, z: 0.38 }, // column
-    { geo: box(0.22, 0.12, 0.22), x: 0.58, y: 1.28, z: 0.38 }, // column cap
-    { geo: box(1.05, 0.11, 0.12), x: 0.08, y: 1.28, z: 0.38 }, // boom
-    { geo: box(0.14, 0.1, 0.14), x: -0.38, y: 1.22, z: 0.38 }, // trolley
-    { geo: box(0.08, 0.22, 0.08), x: -0.38, y: 1.06, z: 0.38 }, // hoist post
-    { geo: box(0.2, 0.08, 0.16), x: -0.38, y: 0.92, z: 0.38 }, // grabber head
+    // ── rigid transfer gantry + claw ─────────────────────────────────────
+    // Column on the starboard edge, boom over the can lane, two-prong claw
+    // (concept articulated arm → icon-scale rigid transfer with visible grabber).
+    { geo: box(0.12, 0.82, 0.12), x: 0.56, y: 0.86, z: 0.38 }, // column
+    { geo: box(0.2, 0.12, 0.2), x: 0.56, y: 1.32, z: 0.38 }, // column cap
+    { geo: box(1.0, 0.11, 0.12), x: 0.08, y: 1.32, z: 0.38 }, // boom
+    { geo: box(0.14, 0.1, 0.14), x: -0.36, y: 1.26, z: 0.38 }, // trolley
+    { geo: box(0.09, 0.2, 0.09), x: -0.36, y: 1.1, z: 0.38 }, // hoist post
+    { geo: box(0.22, 0.08, 0.16), x: -0.36, y: 0.96, z: 0.38 }, // claw base
+    { geo: box(0.07, 0.16, 0.07), x: -0.44, y: 0.86, z: 0.38 }, // claw prong L
+    { geo: box(0.07, 0.16, 0.07), x: -0.28, y: 0.86, z: 0.38 }, // claw prong R
 
-    // ── radio mast on the warehouse roof ─────────────────────────────────
-    { geo: box(0.09, 0.52, 0.09), x: 0.28, y: 1.27, z: -0.22 }, // mast spar
-    { geo: box(0.07, 0.2, 0.07), x: 0.28, y: 1.58, z: -0.22 }, // tip
-    // dish: thin cylinder canted slightly so it reads from the match camera
-    { geo: cyl(0.15, 0.15, 0.07, 6), x: 0.28, y: 1.42, z: -0.14, rx: 0.55 },
-    { geo: box(0.07, 0.12, 0.07), x: 0.28, y: 1.34, z: -0.14 }, // dish mount
+    // ── radio mast on the warehouse roof (lattice-ish) ───────────────────
+    { geo: box(0.09, 0.48, 0.09), x: 0.26, y: 1.36, z: -0.26 }, // mast spar
+    { geo: box(0.07, 0.26, 0.07), x: 0.26, y: 1.34, z: -0.26, rz: 0.55 }, // crossed braces
+    { geo: box(0.07, 0.26, 0.07), x: 0.26, y: 1.34, z: -0.26, rz: -0.55 },
+    { geo: box(0.07, 0.18, 0.07), x: 0.26, y: 1.68, z: -0.26 }, // tip spar
+    { geo: box(0.07, 0.12, 0.07), x: 0.26, y: 1.42, z: -0.16 }, // dish mount
+    { geo: cyl(0.15, 0.15, 0.07, 6), x: 0.26, y: 1.5, z: -0.14, rx: 0.55 }, // dish
   ]);
   const factory = factoryKit.solid;
 
@@ -1064,6 +1149,8 @@ export function makeBuildingGeos() {
   function stage(pad: THREE.BufferGeometry, park: ProductPark, unit: THREE.BufferGeometry) {
     const posed = materializePart({
       geo: unit,
+      // three.js +rx tips a +Z nose down, so a nose-up park pitch is -rx.
+      rx: -(park.pitch ?? 0),
       ry: park.yaw,
       sx: park.scale,
       sy: park.scale,

@@ -103,6 +103,103 @@ export function flatHex(r: number) {
   return g;
 }
 
+/** One horizontal slice of a lofted hull. */
+export type HullRing = {
+  /** Slice centre height. */
+  y: number;
+  /** Slice thickness in Y. */
+  t: number;
+  /** Planform scale for this slice (1 = the reference outline). */
+  sx?: number;
+  sz?: number;
+};
+
+/**
+ * Chamfered hull — one planform sliced into stacked plates of varying width.
+ *
+ * A single `plate` has vertical sides, so however good its outline is the body
+ * reads as a slab: flat top, flat bottom, hard 90° flanks catching light along
+ * their whole length. That is the "blocky" failure, and no amount of work on
+ * the *plan* outline fixes it, because the problem is the section.
+ *
+ * Stacking narrow → wide → narrow slices gives a faceted section instead: the
+ * flanks break into bands that fall away above and below the beam line, which
+ * is what a rounded fuselage looks like once you low-poly it. Pulling `sz` in
+ * on the outer slices rounds the *profile* at the same time, so the nose and
+ * tail taper in all three axes rather than ending in a wall.
+ *
+ * Three slices is the minimum that reads as chamfered; five is the most worth
+ * paying for — beyond that the wire turns into a contour map at match zoom.
+ *
+ * Returns specs rather than a merged geo so callers fold these into their own
+ * `mergeParts` alongside the rest of the machine.
+ */
+export function loftRings(
+  pts: readonly (readonly [number, number])[],
+  rings: readonly HullRing[],
+  zPivot = 0,
+): PartSpec[] {
+  return rings.map((r) => {
+    const sx = r.sx ?? 1;
+    const sz = r.sz ?? 1;
+    const scaled = pts.map(
+      ([x, z]) => [x * sx, zPivot + (z - zPivot) * sz] as [number, number],
+    );
+    return { geo: plate(scaled, r.t), y: r.y };
+  });
+}
+
+/**
+ * Geodesic dome cap — icosphere sliced by the plane `y = cutY`, upper part kept,
+ * translated so the cut sits at y=0.
+ *
+ * A lat/long `SphereGeometry` hemisphere is *not* a substitute here. Its quads
+ * split into near-coplanar triangle pairs, so `EdgesGeometry` culls every
+ * diagonal at any sane crease angle and what survives is rings + meridians —
+ * a barrel of strips, not a geodesic. An icosphere's faces all meet at real
+ * dihedral angles, so every strut survives and the triangulation *is* the read.
+ *
+ * `detail` 1 (80 faces) is the working depth: at 2 the dihedrals fall under an
+ * 18° crease and the lattice dissolves back into a blob.
+ *
+ * Slicing (rather than scaling a whole sphere) is what gives a level base to
+ * seat on a ring, and it keeps the struts evenly sized instead of squashing
+ * them toward the equator.
+ */
+export function geoDome(r: number, detail = 1, cutY = 0) {
+  const src = new THREE.IcosahedronGeometry(r, detail);
+  const pos = src.attributes.position as THREE.BufferAttribute;
+  const out: number[] = [];
+  const at = (i: number): [number, number, number] => [pos.getX(i), pos.getY(i), pos.getZ(i)];
+
+  for (let f = 0; f < pos.count; f += 3) {
+    const tri = [at(f), at(f + 1), at(f + 2)];
+    // Sutherland–Hodgman against the half-space y >= cutY.
+    const kept: [number, number, number][] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = tri[i]!;
+      const b = tri[(i + 1) % 3]!;
+      const da = a[1] - cutY;
+      const db = b[1] - cutY;
+      if (da >= 0) kept.push(a);
+      if (da >= 0 !== db >= 0) {
+        const t = da / (da - db);
+        kept.push([a[0] + (b[0] - a[0]) * t, cutY, a[2] + (b[2] - a[2]) * t]);
+      }
+    }
+    for (let i = 2; i < kept.length; i++) {
+      out.push(...kept[0]!, ...kept[i - 1]!, ...kept[i]!);
+    }
+  }
+  src.dispose();
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(out, 3));
+  g.translate(0, -cutY, 0);
+  g.computeVertexNormals();
+  return g;
+}
+
 export function flatRing(inner: number, outer: number, seg = 16) {
   const g = new THREE.RingGeometry(inner, outer, seg);
   g.rotateX(-Math.PI / 2);

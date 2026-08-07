@@ -327,6 +327,8 @@ export function syncBuildings(host: BuildingsHost, snap: SimSnapshot) {
             uScale,
             uScale,
             park.yaw,
+            0,
+            park.pitch ?? 0,
           );
           host.entityRoot.add(shell);
 

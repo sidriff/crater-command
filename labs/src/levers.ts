@@ -36,15 +36,21 @@ export class LeverRegistry {
     return this.values.get(id) ?? this.defs.get(id)?.value ?? 0;
   }
 
-  set(id: string, value: number, silent = false) {
+  /**
+   * Set a lever value.
+   * Range levers: by default **not** clamped to min/max so the number box can
+   * override the slider. Pass `clamp: true` when the source is the range thumb.
+   */
+  set(id: string, value: number, silent = false, opts?: { clamp?: boolean }) {
     const def = this.defs.get(id);
     let v = value;
-    if (def?.kind === "range") {
+    if (!Number.isFinite(v)) return;
+    if (def?.kind === "toggle") {
+      v = value >= 0.5 ? 1 : 0;
+    } else if (def?.kind === "range" && opts?.clamp) {
       const min = def.min ?? 0;
       const max = def.max ?? 1;
       v = Math.min(max, Math.max(min, v));
-    } else if (def?.kind === "toggle") {
-      v = value >= 0.5 ? 1 : 0;
     }
     this.values.set(id, v);
     if (!silent) {
@@ -86,7 +92,15 @@ export function mountLeverPanel(
     list.push(d);
   }
 
-  const inputs = new Map<string, HTMLInputElement>();
+  const rangeSliders = new Map<string, HTMLInputElement>();
+  const numInputs = new Map<string, HTMLInputElement>();
+  const toggleInputs = new Map<string, HTMLInputElement>();
+
+  const formatNum = (d: LeverDef, v: number) => {
+    if (d.step != null && d.step >= 1) return String(Math.round(v));
+    const places = d.step != null && d.step <= 0.01 ? 2 : d.step != null && d.step < 1 ? 2 : 1;
+    return Number(v.toFixed(places)).toString();
+  };
 
   for (const [section, defs] of bySection) {
     const h = document.createElement("div");
@@ -104,59 +118,106 @@ export function mountLeverPanel(
       const name = document.createElement("span");
       name.className = "lab-lever-label";
       name.textContent = d.label;
-      const val = document.createElement("span");
-      val.className = "lab-lever-val";
-      head.append(name, val);
+      head.appendChild(name);
 
-      const input = document.createElement("input");
-      input.id = `lever-${d.id}`;
       if (d.kind === "toggle") {
+        const val = document.createElement("span");
+        val.className = "lab-lever-val";
+        head.appendChild(val);
+
+        const input = document.createElement("input");
+        input.id = `lever-${d.id}`;
         input.type = "checkbox";
         input.checked = levers.get(d.id) >= 0.5;
-      } else {
-        input.type = "range";
-        input.min = String(d.min ?? 0);
-        input.max = String(d.max ?? 1);
-        input.step = String(d.step ?? 0.01);
-        input.value = String(levers.get(d.id));
-      }
-      inputs.set(d.id, input);
+        toggleInputs.set(d.id, input);
 
-      const writeVal = () => {
-        const v = levers.get(d.id);
-        if (d.kind === "toggle") {
+        const writeVal = () => {
+          const v = levers.get(d.id);
           val.textContent = v >= 0.5 ? "ON" : "OFF";
           row.classList.toggle("is-on", v >= 0.5);
-        } else {
-          const shown =
-            d.step != null && d.step >= 1 ? String(Math.round(v)) : v.toFixed(2);
-          val.textContent = d.unit ? `${shown}${d.unit}` : shown;
-        }
-      };
-      writeVal();
-
-      const onInput = () => {
-        if (d.kind === "toggle") {
-          levers.set(d.id, input.checked ? 1 : 0);
-        } else {
-          levers.set(d.id, parseFloat(input.value));
-        }
+        };
         writeVal();
-        opts?.onChange?.(d.id, levers.get(d.id));
-      };
-      // range: live drag; toggle: change (avoids double-fire from input+change)
-      input.addEventListener(d.kind === "toggle" ? "change" : "input", onInput);
 
-      if (d.kind === "toggle") {
-        // Clickable row: label associates with checkbox without double-wrap issues
+        input.addEventListener("change", () => {
+          levers.set(d.id, input.checked ? 1 : 0);
+          writeVal();
+          opts?.onChange?.(d.id, levers.get(d.id));
+        });
+
         const label = document.createElement("label");
         label.className = "lab-lever-toggle-row";
         label.htmlFor = input.id;
         label.append(input, head);
         row.appendChild(label);
       } else {
+        // Editable number + unit — type exacts; may go outside slider min/max
+        const min = d.min ?? 0;
+        const max = d.max ?? 1;
+        const numWrap = document.createElement("span");
+        numWrap.className = "lab-lever-num-wrap";
+
+        const num = document.createElement("input");
+        num.type = "number";
+        num.className = "lab-lever-num";
+        num.id = `lever-num-${d.id}`;
+        // No min/max attrs — browser must not block overrides past the slider
+        num.step = String(d.step ?? 0.01);
+        num.value = formatNum(d, levers.get(d.id));
+        num.title = "Type exact value (can exceed slider range)";
+        numInputs.set(d.id, num);
+
+        numWrap.appendChild(num);
+        if (d.unit) {
+          const unit = document.createElement("span");
+          unit.className = "lab-lever-unit";
+          unit.textContent = d.unit;
+          numWrap.appendChild(unit);
+        }
+        head.appendChild(numWrap);
+
+        const slider = document.createElement("input");
+        slider.id = `lever-${d.id}`;
+        slider.type = "range";
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(d.step ?? 0.01);
+        slider.value = String(levers.get(d.id));
+        rangeSliders.set(d.id, slider);
+
+        const syncFromRegistry = () => {
+          const v = levers.get(d.id);
+          const outside = v < min || v > max;
+          // Thumb parks at the edge when value is outside slider domain
+          slider.value = String(Math.min(max, Math.max(min, v)));
+          slider.classList.toggle("is-overridden", outside);
+          num.classList.toggle("is-overridden", outside);
+          if (document.activeElement !== num) num.value = formatNum(d, v);
+        };
+        syncFromRegistry();
+
+        const commit = (raw: number, fromSlider: boolean) => {
+          if (!Number.isFinite(raw)) {
+            syncFromRegistry();
+            return;
+          }
+          levers.set(d.id, raw, false, fromSlider ? { clamp: true } : undefined);
+          syncFromRegistry();
+          opts?.onChange?.(d.id, levers.get(d.id));
+        };
+
+        slider.addEventListener("input", () => commit(parseFloat(slider.value), true));
+        // change = blur / enter-like; input alone is noisy while typing
+        num.addEventListener("change", () => commit(parseFloat(num.value), false));
+        num.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit(parseFloat(num.value), false);
+            num.blur();
+          }
+        });
+
         // Range: don't wrap in <label> (label-click jumps the thumb to click pos)
-        row.append(head, input);
+        row.append(head, slider);
       }
       if (d.tradesAgainst) {
         const trade = document.createElement("div");
@@ -174,22 +235,29 @@ export function mountLeverPanel(
       host.classList.remove("lab-levers");
     },
     refresh() {
-      for (const [id, input] of inputs) {
-        const d = levers.list().find((x) => x.id === id);
-        if (!d) continue;
-        const v = levers.get(id);
-        if (d.kind === "toggle") input.checked = v >= 0.5;
-        else input.value = String(v);
-        const row = host.querySelector(`[data-id="${id}"]`);
+      for (const d of levers.list()) {
+        const v = levers.get(d.id);
+        const row = host.querySelector(`[data-id="${d.id}"]`);
         if (!row) continue;
-        if (d.kind === "toggle") row.classList.toggle("is-on", v >= 0.5);
-        const valEl = row.querySelector(".lab-lever-val");
-        if (valEl) {
-          if (d.kind === "toggle") valEl.textContent = v >= 0.5 ? "ON" : "OFF";
-          else {
-            const shown =
-              d.step != null && d.step >= 1 ? String(Math.round(v)) : v.toFixed(2);
-            valEl.textContent = d.unit ? `${shown}${d.unit}` : shown;
+        if (d.kind === "toggle") {
+          const input = toggleInputs.get(d.id);
+          if (input) input.checked = v >= 0.5;
+          row.classList.toggle("is-on", v >= 0.5);
+          const valEl = row.querySelector(".lab-lever-val");
+          if (valEl) valEl.textContent = v >= 0.5 ? "ON" : "OFF";
+        } else {
+          const slider = rangeSliders.get(d.id);
+          const num = numInputs.get(d.id);
+          const min = d.min ?? 0;
+          const max = d.max ?? 1;
+          const outside = v < min || v > max;
+          if (slider) {
+            slider.value = String(Math.min(max, Math.max(min, v)));
+            slider.classList.toggle("is-overridden", outside);
+          }
+          if (num && document.activeElement !== num) {
+            num.value = formatNum(d, v);
+            num.classList.toggle("is-overridden", outside);
           }
         }
       }

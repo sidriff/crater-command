@@ -6,6 +6,7 @@
  *   /?lab=mesh&mesh=scout
  *   /?lab=readability&board=identity
  *   /?lab=concept&concept=rover
+ *   /?lab=dispatch&dispatch=scout_works
  */
 
 export type LabQuery = {
@@ -13,6 +14,7 @@ export type LabQuery = {
   mesh: string | null;
   board: string | null;
   concept: string | null;
+  dispatch: string | null;
 };
 
 export function readLabQuery(search = location.search): LabQuery {
@@ -22,6 +24,7 @@ export function readLabQuery(search = location.search): LabQuery {
     mesh: emptyToNull(q.get("mesh") ?? q.get("m")),
     board: emptyToNull(q.get("board") ?? q.get("b")),
     concept: emptyToNull(q.get("concept") ?? q.get("c")),
+    dispatch: emptyToNull(q.get("dispatch") ?? q.get("d")),
   };
 }
 
@@ -42,6 +45,10 @@ export function writeLabQuery(
   setOrDel(["mesh", "m"], patch.mesh === undefined ? undefined : patch.mesh);
   setOrDel(["board", "b"], patch.board === undefined ? undefined : patch.board);
   setOrDel(["concept", "c"], patch.concept === undefined ? undefined : patch.concept);
+  setOrDel(
+    ["dispatch", "d"],
+    patch.dispatch === undefined ? undefined : patch.dispatch,
+  );
 
   const next = `${url.pathname}${q.toString() ? `?${q}` : ""}${url.hash}`;
   if (opts?.replace === false) history.pushState(null, "", next);
