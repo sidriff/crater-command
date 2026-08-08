@@ -13,6 +13,14 @@ import {
 import { recycleOpNode, syncOps } from "./entityOps";
 import { makePlumeGeo, type PlumeMesh } from "./entityPlumes";
 import { syncUnits, updateDust } from "./entityUnits";
+import { syncDeaths, type UnitDeathPose } from "./entityDeaths";
+import {
+  disposeScars,
+  makeScarFillGeo,
+  makeScarRingGeo,
+  updateScars,
+  type Scar,
+} from "./entityScars";
 import { makeBuildingGeos } from "./buildingGeos";
 import { makeUnitGeos } from "./unitGeos";
 import { PlanetFloaterLayer } from "./planetFloaters";
@@ -24,6 +32,10 @@ export class PlanetEntityLayer {
   entityRoot: THREE.Group;
   projectileRoot: THREE.Group;
   dustRoot = new THREE.Group();
+  /** Death theater + wire shards — not recycled with live entities each frame. */
+  deathRoot = new THREE.Group();
+  shardRoot = new THREE.Group();
+  scarRoot = new THREE.Group();
   private scene: THREE.Scene;
 
   unitGeos = makeUnitGeos();
@@ -57,6 +69,23 @@ export class PlanetEntityLayer {
   buildFirstSeen = new Map<number, number>();
   unitFirstSeen = new Map<number, number>();
   mineralMemory = new Map<number, { x: number; y: number; yield: number; maxYield: number }>();
+  /** Last rendered pose per unit id — consumed by death theater when id vanishes. */
+  deathPoses = new Map<number, UnitDeathPose>();
+  /** Last rendered pose per building id — planted death theater. */
+  buildingDeathPoses = new Map<number, import("./entityDeaths").BuildingDeathPose>();
+  deathPool: THREE.Object3D[] = [];
+  deathActors: import("./entityDeaths").DeathHost["deathActors"] = [];
+  buildingDeathActors: import("./entityDeaths").DeathHost["buildingDeathActors"] = [];
+  shardPool: import("./entityDeaths").DeathHost["shardPool"] = [];
+  shardActive = 0;
+  scarPool: Scar[] = [];
+  scarActive = 0;
+  scarRingGeo = makeScarRingGeo();
+  scarFillGeo = makeScarFillGeo();
+  scarMatTemplates: Record<
+    string,
+    { ring: THREE.LineBasicMaterial; fill: THREE.MeshBasicMaterial }
+  > = {};
   private floaters: PlanetFloaterLayer;
 
   _tip = new THREE.Vector3();
@@ -71,6 +100,9 @@ export class PlanetEntityLayer {
     this.projectileRoot = projectileRoot;
     this.viewer = viewer;
     this.scene.add(this.dustRoot);
+    this.scene.add(this.deathRoot);
+    this.scene.add(this.shardRoot);
+    this.scene.add(this.scarRoot);
     this.floaters = new PlanetFloaterLayer(scene);
 
     this.hullMat = new THREE.MeshBasicMaterial({
@@ -269,6 +301,9 @@ export class PlanetEntityLayer {
     syncMinerals(this, snap);
     syncBuildings(this, snap);
     syncUnits(this, snap, dt);
+    // Pose handoff recorded during syncUnits; theater owns the corpse after
+    syncDeaths(this, snap, dt);
+    updateScars(this, dt);
     updateDust(this, dt);
     syncMineBeams(this, snap);
     syncBuildZaps(this, snap, dt);
@@ -437,6 +472,7 @@ export class PlanetEntityLayer {
       else if (tag === "scaffold") this.scaffoldPool.push(c);
       else if (tag === "sky") this.skyPool.push(c as THREE.Mesh);
       else if (tag === "turret") this.turretPool.push(c);
+      else if (tag === "death") this.deathPool.push(c);
       else if (tag === "op-radio" || tag === "op-link") {
         if (!recycleOpNode(c)) c.removeFromParent?.();
       }
@@ -476,6 +512,15 @@ export class PlanetEntityLayer {
         (g as THREE.BufferGeometry).dispose();
     });
     this.scene.remove(this.dustRoot);
+    this.scene.remove(this.deathRoot);
+    this.scene.remove(this.shardRoot);
+    this.scene.remove(this.scarRoot);
+    disposeScars(this);
+    for (const s of this.shardPool) {
+      (s.line.material as THREE.Material).dispose();
+      s.line.geometry.dispose();
+    }
+    this.shardPool.length = 0;
     this.floaters.dispose();
   }
 }

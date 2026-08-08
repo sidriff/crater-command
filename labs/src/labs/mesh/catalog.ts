@@ -1,6 +1,9 @@
 /**
  * Mesh catalog — real game geos from unitGeos / buildingGeos.
  * Lab never invents alternate art; it only stages these solids for isolation.
+ *
+ * Buildings with CRT construction kits stage **per-part geos** (same pieces
+ * that resolve during build) so Death lab can blow them apart as solids.
  */
 import type { BufferGeometry } from "three";
 import { makeBuildingGeos } from "@game/render/buildingGeos";
@@ -10,6 +13,20 @@ export type MeshPacks = {
   units: ReturnType<typeof makeUnitGeos>;
   buildings: ReturnType<typeof makeBuildingGeos>;
 };
+
+/**
+ * Prefer construction-kit parts when present (hand-drawn build pieces).
+ * Falls back to the merged solid.
+ */
+export function kitParts(
+  packs: MeshPacks,
+  kitKey: string,
+  solid: BufferGeometry,
+): BufferGeometry[] {
+  const kit = packs.buildings.kits?.[kitKey];
+  if (kit?.parts?.length) return kit.parts;
+  return [solid];
+}
 
 /** Who fields this mesh in the asymmetric roster (units). */
 export type MeshFaction = "operators" | "blight" | "mandate" | "shared";
@@ -327,8 +344,8 @@ export const MESHES: readonly MeshDef[] = [
     concept: "depot",
     faction: "operators",
     unitTier: 0,
-    parts: (p) => [p.buildings.depot],
-    note: "Empty apron — match stages the rover on it live.",
+    parts: (p) => kitParts(p, "depot", p.buildings.depot),
+    note: "Empty apron — match stages the rover on it live. Kit parts for CRT build / death chips + boom.",
   },
   {
     id: "b:depotStaged",
@@ -350,7 +367,18 @@ export const MESHES: readonly MeshDef[] = [
     faction: "operators",
     unitTier: 0,
     parts: (p) => [p.buildings.scoutPadStaged],
-    note: "Ground station: launch rail with a drone parked on it + uplink dish. Match draws the drone live (supply-cap / launch).",
+    note: "Staged chrome (rail + drone). Empty kit pieces live under b:scoutPadEmpty if needed.",
+  },
+  {
+    id: "b:scoutPadEmpty",
+    label: "Scout Works · empty kit",
+    section: "Buildings",
+    crease: 18,
+    concept: "scout_works",
+    faction: "operators",
+    unitTier: 0,
+    parts: (p) => kitParts(p, "scoutPad", p.buildings.scoutPad),
+    note: "Construction-kit parts only — death chips peel these hand-drawn pieces before the boom.",
   },
   {
     id: "b:dome",
@@ -360,7 +388,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "dome",
     faction: "operators",
     unitTier: 0,
-    parts: (p) => [p.buildings.dome],
+    parts: (p) => kitParts(p, "dome", p.buildings.dome),
   },
   {
     id: "b:command",
@@ -370,7 +398,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "command",
     faction: "operators",
     unitTier: 1,
-    parts: (p) => [p.buildings.command],
+    parts: (p) => kitParts(p, "command", p.buildings.command),
   },
   {
     id: "b:refinery",
@@ -380,7 +408,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "refinery",
     faction: "operators",
     unitTier: 1,
-    parts: (p) => [p.buildings.refinery],
+    parts: (p) => kitParts(p, "refinery", p.buildings.refinery),
   },
   {
     id: "b:barracks",
@@ -390,7 +418,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "bay",
     faction: "operators",
     unitTier: 1,
-    parts: (p) => [p.buildings.barracks],
+    parts: (p) => kitParts(p, "barracks", p.buildings.barracks),
     note: "Gantry on four legs — the deck is the stall, not a floor.",
   },
   {
@@ -412,7 +440,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "turret",
     faction: "operators",
     unitTier: 1,
-    parts: (p) => [p.buildings.turret],
+    parts: (p) => kitParts(p, "turret", p.buildings.turret),
   },
   {
     id: "b:factory",
@@ -422,7 +450,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "logistics",
     faction: "operators",
     unitTier: 2,
-    parts: (p) => [p.buildings.factory],
+    parts: (p) => kitParts(p, "factory", p.buildings.factory),
     note: "Ops Logistics currently aliases this geo.",
   },
   {
@@ -433,7 +461,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "aa",
     faction: "operators",
     unitTier: 2,
-    parts: (p) => [p.buildings.aa],
+    parts: (p) => kitParts(p, "aa", p.buildings.aa),
   },
   {
     id: "b:airpad",
@@ -443,7 +471,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "airpad",
     faction: "operators",
     unitTier: 2,
-    parts: (p) => [p.buildings.airpad],
+    parts: (p) => kitParts(p, "airpad", p.buildings.airpad),
     note: "Clamps sit outside the interceptor wingspan. Bomber Works reuses this.",
   },
   {
@@ -476,7 +504,7 @@ export const MESHES: readonly MeshDef[] = [
     concept: "null_lattice",
     faction: "operators",
     unitTier: 3,
-    parts: (p) => [p.buildings.dome],
+    parts: (p) => kitParts(p, "dome", p.buildings.dome),
     note: "Match aliases habitat dome until a lattice geo exists — plate is open wireframe octahedron.",
   },
 
@@ -488,7 +516,7 @@ export const MESHES: readonly MeshDef[] = [
     crease: 18,
     faction: "shared",
     unitTier: 0,
-    parts: (p) => [p.buildings.extractor],
+    parts: (p) => kitParts(p, "extractor", p.buildings.extractor),
   },
   {
     id: "p:scaffoldDeck",

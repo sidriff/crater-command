@@ -6,6 +6,7 @@ import {
   startMusic,
   unlockAudio,
 } from "../game/audio/music";
+import { clearAudioListener, setAudioListener } from "../game/audio/spatial";
 import {
   sfxBlip,
   sfxClick,
@@ -584,7 +585,13 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
   unsub = session.on((snap: SimSnapshot) => {
     if (disposed) return;
     view?.setSnapshot(snap);
-    tickCombatSfx(snap);
+    if (view) {
+      const listen = view.getAudioListener();
+      setAudioListener(listen);
+      tickCombatSfx(snap, listen);
+    } else {
+      tickCombatSfx(snap);
+    }
     loading.classList.add("hidden");
 
     if (!didAdvisor) {
@@ -729,6 +736,7 @@ export function mountPlay(stage: HTMLElement, cfg: PlayConfig, cb: PlayCallbacks
       session?.stop();
       view?.dispose();
       resetCombatSfx();
+      clearAudioListener();
       stage.replaceChildren();
     },
   };

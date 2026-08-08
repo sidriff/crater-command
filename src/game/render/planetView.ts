@@ -1,6 +1,7 @@
 import * as THREE from "three";
+import type { AudioListenerPose } from "../audio/spatial";
 import { GLOBE_RADIUS, MAP_H, MAP_W } from "../sim/defs";
-import { START_P0 } from "../sim/terrain";
+import { START_P0, dirToMap } from "../sim/terrain";
 import type { BuildingKind, PlayerId, SimSnapshot } from "../sim/types";
 import { PlanetEntityLayer } from "./planetEntities";
 import { attachFowShader, createFowState, updateFow, type FowState } from "./planetFow";
@@ -354,6 +355,45 @@ export class PlanetView {
   /** Screen-center map cell currently under the reticle (or null). */
   getPlaceCursor(): { x: number; y: number } | null {
     return this.placeCursor;
+  }
+
+  /**
+   * Camera focus as map listener for spatial SFX.
+   * Screen-right is sampled in map space so pan tracks orbit/pan.
+   */
+  getAudioListener(): AudioListenerPose {
+    const n = this.focus.clone().normalize();
+    const focusMap = dirToMap(n.x, n.y, n.z);
+
+    // Step along panEast (screen-right on the surface) → map delta = right vector
+    this.tmp.copy(this.focus).addScaledVector(this.panEast, Math.max(2, this.dist * 0.04));
+    projectToSurface(this.tmp, this.tmp);
+    const tipN = this.tmp.clone().normalize();
+    const tipMap = dirToMap(tipN.x, tipN.y, tipN.z);
+
+    let rx = tipMap.x - focusMap.x;
+    if (rx > MAP_W * 0.5) rx -= MAP_W;
+    if (rx < -MAP_W * 0.5) rx += MAP_W;
+    let ry = tipMap.y - focusMap.y;
+    const len = Math.hypot(rx, ry);
+    if (len > 1e-6) {
+      rx /= len;
+      ry /= len;
+    } else {
+      rx = 1;
+      ry = 0;
+    }
+
+    // Zoomed out → hear farther in map units (events still on-screen read near)
+    const hearScale = Math.max(0.55, Math.min(2.1, this.dist / DEFAULT_DIST));
+
+    return {
+      x: focusMap.x,
+      y: focusMap.y,
+      rightX: rx,
+      rightY: ry,
+      hearScale,
+    };
   }
 
   /** Snap camera focus to a map point (operation Focus). */

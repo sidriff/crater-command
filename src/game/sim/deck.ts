@@ -92,6 +92,18 @@ export const CARDS: Record<CardId, CardDef> = {
     operation: false,
     blurb: "Launches a recon drone. Lights fog of war.",
   },
+  ops_recon: {
+    id: "ops_recon",
+    name: "Recon",
+    short: "Recon",
+    building: null,
+    cost: 50,
+    tech: false,
+    operation: true,
+    opKind: "recon",
+    opRadius: 1.35,
+    blurb: "OPERATION. Tasks a LIGHT unit to the mark. Completes on arrival. Stays in hand.",
+  },
   ops_dome: {
     id: "ops_dome",
     name: "Habitat Dome",
@@ -111,12 +123,11 @@ export const CARDS: Record<CardId, CardDef> = {
     cost: 250,
     tech: true,
     operation: false,
-    blurb: "TECH T1. Unlocks combat, Refinery, Recon, and all T2 doctrines into discard.",
+    blurb: "TECH T1. Unlocks combat and all T2 doctrines into discard.",
     inject: [
       "ops_turret",
       "ops_bay",
       "ops_refinery",
-      "ops_recon",
       "ops_logistics",
       "ops_em_array",
       "ops_strike_dock",
@@ -143,18 +154,6 @@ export const CARDS: Record<CardId, CardDef> = {
     operation: false,
     blurb: "Trains basic combat rovers (raiders).",
     prereq: "command",
-  },
-  ops_recon: {
-    id: "ops_recon",
-    name: "Recon",
-    short: "Recon",
-    building: null,
-    cost: 50,
-    tech: false,
-    operation: true,
-    opKind: "recon",
-    opRadius: 1.35,
-    blurb: "OPERATION. Tasks a LIGHT unit to the mark. Completes on arrival. Stays in hand.",
   },
   ops_refinery: {
     id: "ops_refinery",
@@ -454,8 +453,8 @@ export const CARDS: Record<CardId, CardDef> = {
 /** Multiset of starting templates (pre-shuffle). */
 export function starterDeck(race: RaceId): CardId[] {
   if (race === "operators") {
-    // 1 Depot, Refinery (T1-gated by prereq), Scout, Dome, Command
-    return ["ops_depot", "ops_refinery", "ops_scout", "ops_dome", "ops_command"];
+    // Depot, Refinery, Scout Works, Recon op, Dome, Command
+    return ["ops_depot", "ops_refinery", "ops_scout", "ops_recon", "ops_dome", "ops_command"];
   }
 
   if (race === "blight") {

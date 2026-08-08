@@ -3,6 +3,10 @@ import { BUILDINGS, START_WORKERS, unitCapCost, unitProducedBy } from "../sim/de
 import type { BuildingKind, PlayerId, RaceId, SimSnapshot, UnitKind } from "../sim/types";
 import { PRODUCT_PARK, SCOUT_PAD } from "./buildingGeos";
 import { crtResolveOn, crtWinkIn, partPhase } from "./entityCrt";
+import {
+  recordBuildingPose,
+  type BuildingDeathPose,
+} from "./entityDeaths";
 import type { UnitSmooth, WireEntity } from "./entityTypes";
 import { placeOnSurface, scaffoldFootprint } from "./planetMath";
 import { ROVER_TURRET_PIVOT, SCOUT_VENTRAL_Y } from "./unitGeos";
@@ -18,6 +22,8 @@ export type BuildingsHost = {
   unitPool: THREE.Object3D[];
   turretPool: THREE.Object3D[];
   unitSmooth: Map<number, UnitSmooth>;
+  /** Present on PlanetEntityLayer — death theater pose handoff. */
+  buildingDeathPoses?: Map<number, BuildingDeathPose>;
   bGeos: any;
   bEdges: Record<string, THREE.EdgesGeometry>;
   unitGeos: ReturnType<typeof import("./unitGeos").makeUnitGeos>;
@@ -355,6 +361,22 @@ export function syncBuildings(host: BuildingsHost, snap: SimSnapshot) {
             turret.scale.set(1, 1, 1);
           }
         }
+      }
+
+      // Death theater handoff — last rendered pose when building id vanishes
+      if (host.buildingDeathPoses && constructionStarted) {
+        recordBuildingPose(host as { buildingDeathPoses: Map<number, BuildingDeathPose> }, {
+          id: b.id,
+          kind: b.kind,
+          race,
+          owner: b.owner,
+          x: b.x,
+          y: b.y,
+          elev: buildElev,
+          sx,
+          sy,
+          yaw,
+        });
       }
     }
 

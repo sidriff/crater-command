@@ -284,7 +284,9 @@ body {
 }
 
 .mesh-notes {
+  display: block;
   width: 100%;
+  min-height: 4.5rem;
   margin: 4px 0 10px;
   padding: 6px 8px;
   background: #000;
@@ -292,13 +294,18 @@ body {
   color: var(--fg);
   font: inherit;
   resize: vertical;
+  /* Flex parents must not crush the field below its usable height */
+  flex-shrink: 0;
 }
 
 .mesh-export {
+  display: block;
   margin-top: 8px;
   width: 100%;
-  max-height: 140px;
-  overflow: auto;
+  min-height: 4rem;
+  /* Prefer scrolling the verdict pane as a whole over a tiny nested pre */
+  max-height: none;
+  overflow: visible;
   padding: 6px 8px;
   background: #000;
   border: 1px solid var(--border);
@@ -306,6 +313,7 @@ body {
   font-size: 10px;
   white-space: pre-wrap;
   word-break: break-word;
+  flex-shrink: 0;
 }
 
 /* Mesh lab: left catalog + 2×2 (mesh | concept / readability | verdict) */
@@ -371,6 +379,58 @@ body {
   display: block;
   width: 100% !important;
   height: 100% !important;
+}
+
+/* Live FPS counters on the isolated mesh stage */
+.mesh-perf-hud {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 5;
+  pointer-events: none;
+  padding: 5px 8px 6px;
+  background: rgba(0, 8, 6, 0.78);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, var(--primary));
+  border-radius: 2px;
+  font-family: var(--font-crt);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  color: var(--muted);
+  min-width: 9.5rem;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.45);
+}
+
+.mesh-perf-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.mesh-perf-k {
+  color: var(--muted);
+  opacity: 0.75;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mesh-perf-v {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.mesh-perf-v[data-band="ok"] {
+  color: var(--primary);
+}
+
+.mesh-perf-v[data-band="warn"] {
+  color: var(--warn);
+}
+
+.mesh-perf-v[data-band="bad"] {
+  color: var(--danger);
 }
 
 .mesh-concept-pane {
@@ -458,13 +518,35 @@ body {
 .mesh-verdict-pane {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  /* Content sizes itself; pane scrolls — do not distribute/shrink children */
+  justify-content: flex-start;
   min-width: 0;
   min-height: 0;
   grid-column: 2;
   grid-row: 2;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #020a08f2;
-  padding: 0 0 8px;
+  padding: 0 0 12px;
+}
+
+/* Flex default shrink:1 was crushing notes / handoff to zero height so
+   overflow never kicked in. Keep natural content height and scroll the pane. */
+.mesh-verdict-pane > * {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.mesh-verdict-pane .mesh-feedback {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.mesh-verdict-pane .mesh-feedback > * {
+  flex: 0 0 auto;
 }
 
 .mesh-verdict-pane .mesh-feedback,
@@ -487,8 +569,47 @@ body {
   box-sizing: border-box;
 }
 
+/* Destruction lab (formerly Death): left catalog + full-bleed stage */
+.destruction-shell,
+.death-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  min-width: 0;
+  background: #02040a;
+}
+
+.destruction-shell .mesh-nav,
+.death-shell .mesh-nav {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.destruction-stage,
+.death-stage {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.destruction-stage canvas,
+.death-stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 @media (max-width: 1100px) {
-  .mesh-shell {
+  .mesh-shell,
+  .destruction-shell,
+  .death-shell,
+  .construction-shell {
     grid-template-columns: minmax(160px, 200px) 1fr;
   }
 }
@@ -511,6 +632,26 @@ body {
     grid-row: 2;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
+  }
+
+  .destruction-shell,
+  .death-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 32vh) 1fr;
+  }
+
+  .destruction-shell .mesh-nav,
+  .death-shell .mesh-nav {
+    grid-column: 1;
+    grid-row: 1;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .destruction-stage,
+  .death-stage {
+    grid-column: 1;
+    grid-row: 2;
   }
 }
 
@@ -548,6 +689,23 @@ body {
   color: var(--primary);
   font-weight: 400;
   margin-right: 4px;
+}
+
+/* Shell fps / ms / draw — band from main loop */
+.lab-stat-perf {
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-stat-perf[data-band="ok"] {
+  color: var(--primary);
+}
+
+.lab-stat-perf[data-band="warn"] {
+  color: var(--warn);
+}
+
+.lab-stat-perf[data-band="bad"] {
+  color: var(--danger);
 }
 
 .lab-section-title {
@@ -834,105 +992,80 @@ body {
   margin: 0 0 8px;
 }
 
-/* ── Dispatch lab (producer egress) ───────────────────── */
+/* ── Construction lab (left catalog + stage, same shell as death) ── */
 
-.dispatch-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-
-.dispatch-card {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  text-align: left;
-  justify-content: flex-start;
-}
-
-.dispatch-card-name {
-  flex: 1;
+.construction-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  grid-template-rows: 1fr;
+  min-height: 0;
   min-width: 0;
+  background: #02040a;
+}
+
+.construction-shell .mesh-nav {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.construction-stage {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.dispatch-card-badge {
-  flex-shrink: 0;
-  width: 1.25em;
-  height: 1.25em;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 700;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  background: #000;
+.construction-stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
-.dispatch-card.is-keep .dispatch-card-badge,
-.dispatch-card-badge[data-verdict="keep"] {
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-}
-
-.dispatch-card.is-revise .dispatch-card-badge,
-.dispatch-card-badge[data-verdict="revise"] {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
-}
-
-.dispatch-card.is-reject .dispatch-card-badge,
-.dispatch-card-badge[data-verdict="reject"] {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-}
-
-.dispatch-card.is-stub {
-  color: var(--muted);
-  opacity: 0.85;
-}
-
-.dispatch-card.is-active {
-  background: var(--primary);
-  color: #001208;
-  border-color: var(--primary);
-  opacity: 1;
-}
-
-.dispatch-card.is-active .dispatch-card-badge {
-  background: #001208;
-}
-
-.dispatch-card.is-keep:not(.is-active) {
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-}
-
-.dispatch-card.is-revise:not(.is-active) {
-  border-color: color-mix(in srgb, var(--warn) 60%, var(--border));
-}
-
-.dispatch-card.is-reject:not(.is-active) {
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
-  opacity: 0.8;
-}
-
-.dispatch-scrub-head {
+.construction-scrub-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.dispatch-scrub {
+.construction-scrub {
   width: 100%;
   margin: 4px 0 0;
   accent-color: var(--primary);
   cursor: pointer;
+}
+
+.mesh-card.is-stub {
+  opacity: 0.88;
+}
+
+@media (max-width: 1100px) {
+  .construction-shell {
+    grid-template-columns: minmax(160px, 200px) 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .construction-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 32vh) 1fr;
+  }
+
+  .construction-shell .mesh-nav {
+    grid-column: 1;
+    grid-row: 1;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .construction-stage {
+    grid-column: 1;
+    grid-row: 2;
+  }
 }
 
 /* ── Concept lab (wireframe art gallery) ───────────────── */

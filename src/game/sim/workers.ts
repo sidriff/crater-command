@@ -138,9 +138,11 @@ export function pickMineFor(
     // Far crystals need a real path; near ones (slope / crater lip) skip A*
     if (d > MINE_SOFT_RANGE && !hasPath(wx, wy, m.x, m.y)) continue;
     const load = assigned.get(m.id) ?? 0;
-    // Prefer under-assigned + linked extractors; slight bias to richer crystals
-    const stockBias = 1 - Math.min(1, m.yield / 100) * 0.15;
-    const score = d + load * 1.8 + (linked.has(m.id) ? -8 : 0) + stockBias;
+    // Distance dominates — expansion builders stick to local rock, not home base.
+    // Linked extractors only nudge among nearby options (never a cross-map magnet).
+    const stockBias = 1 - Math.min(1, m.yield / 100) * 0.12;
+    const linkedBonus = linked.has(m.id) && d < 5.5 ? -1.6 : 0;
+    const score = d * 2.4 + load * 1.5 + linkedBonus + stockBias;
     if (score < bestScore) {
       bestScore = score;
       best = m;
@@ -218,7 +220,7 @@ export function depositCargo(
   u.carrying = false;
   u.cargo = 0;
   u.mineProgress = 0;
-  u.mineMineralId = null;
+  // Keep mineMineralId — return to the same patch after drop-off (don't re-home at base).
   u.exploreX = null;
   u.exploreY = null;
 
@@ -236,7 +238,7 @@ export function depositCargo(
     owner: u.owner,
     amount: yieldAmt,
     born: sim.t,
-    elev: dropKind === "core" ? 2.6 : 1.15,
+    elev: dropKind === "core" ? 2.6 : dropKind === "refinery" ? 1.35 : 1.15,
   });
 }
 
@@ -253,13 +255,17 @@ export function pickDropoff(
   for (const b of sim.buildings) {
     if (b.owner !== owner || !b.done) continue;
     if (race === "operators") {
-      if (b.kind !== "core") continue;
+      // Core + Refinery (local mineral drop-off on expansion)
+      if (b.kind !== "core" && b.kind !== "refinery") continue;
     } else {
       if (b.kind !== "extractor" && b.kind !== "core") continue;
     }
     const d = dist(wx, wy, b.x, b.y);
     let score = d;
-    if (race !== "operators") {
+    if (race === "operators") {
+      // Prefer a nearby refinery over hiking to core
+      if (b.kind === "refinery") score -= 1.2;
+    } else {
       if (b.kind === "core") score += 4;
       else if (mineralId != null && b.linkedMineralId === mineralId) score -= 6;
       else score -= 1.5;
@@ -348,6 +354,8 @@ export function tickWorkers(sim: WorkersHost, dt: number) {
     }
 
     // —— Empty: walk to crystal, channel, fill cargo ——
+    // Sticky patch: after drop-off we keep mineMineralId so expansion workers
+    // walk back to the rock they were on instead of re-picking at the core.
     let m =
       u.mineMineralId != null
         ? sim.minerals.find((mm) => mm.id === u.mineMineralId && mm.yield > 0) ?? null
@@ -363,6 +371,7 @@ export function tickWorkers(sim: WorkersHost, dt: number) {
     }
 
     if (!m) {
+      // Prefer nearest crystal from *here* (post-build site, depleted patch, etc.)
       m = pickMineFor(sim, u.owner, u.x, u.y);
       u.mineMineralId = m?.id ?? null;
       u.mineProgress = 0;

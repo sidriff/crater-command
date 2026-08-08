@@ -14,13 +14,65 @@ export type MovementHost = {
   moveGroundUnit: (u: Unit, tx: number, ty: number, speed: number, dt: number) => void;
 };
 
-/** Minimal host for patrol heading (movement + combat path lasers). */
+/** Minimal host for scout nav / harass / combat. */
 export type ScoutNavHost = {
   t: number;
+  units: Unit[];
   buildings: Building[];
 };
 
-/** Shared with combat so path-lasers use the same heading the patrol flies. */
+/**
+ * Scout engage target: units (ground + air, even if they shoot back) and buildings.
+ * Prefers workers → soft ground → air duels → buildings; sticky current lock.
+ */
+export function findScoutTarget(
+  sim: ScoutNavHost,
+  u: Unit,
+): { id: number; x: number; y: number; isBuilding: boolean } | null {
+  const def = UNITS.scout;
+  const scan = Math.max(def.vision + 1.5, 9);
+  let best: { id: number; x: number; y: number; isBuilding: boolean } | null = null;
+  let bestScore = 1e9;
+
+  for (const ou of sim.units) {
+    if (ou.owner === u.owner) continue;
+    const oDef = UNITS[ou.kind];
+    if (oDef.air && !def.attackAir) continue;
+    if (!oDef.air && !def.attackGround) continue;
+    const d = dist(u.x, u.y, ou.x, ou.y);
+    if (d > scan) continue;
+    let score = d;
+    if (ou.kind === "worker") score -= 4.5;
+    else if (!oDef.air && !oDef.attackAir) score -= 1.4; // raider / tank
+    else if (oDef.air) score -= 0.35; // willing to trade with fighters
+    if (u.targetId === ou.id && !u.targetIsBuilding) score -= 1.8;
+    if (score < bestScore) {
+      bestScore = score;
+      best = { id: ou.id, x: ou.x, y: ou.y, isBuilding: false };
+    }
+  }
+
+  if (def.attackGround) {
+    for (const b of sim.buildings) {
+      if (b.owner === u.owner) continue;
+      const d = dist(u.x, u.y, b.x, b.y);
+      if (d > scan) continue;
+      // Units first; still peel bases when nothing softer is nearby
+      let score = d + 1.35;
+      if (!b.done) score -= 0.9;
+      if (b.kind === "core") score -= 0.55;
+      if (b.kind === "depot" || b.kind === "extractor" || b.kind === "refinery") score -= 0.7;
+      if (u.targetId === b.id && u.targetIsBuilding) score -= 1.8;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { id: b.id, x: b.x, y: b.y, isBuilding: true };
+      }
+    }
+  }
+  return best;
+}
+
+/** Shared with combat so harass and patrol use the same recon loop. */
 export function scoutPatrolPoint(sim: ScoutNavHost, u: Unit): { x: number; y: number } {
   const enemyCore = sim.buildings.find((b) => b.owner !== u.owner && b.kind === "core");
   const home = sim.buildings.find((b) => b.owner === u.owner && b.kind === "core");
@@ -58,6 +110,26 @@ export function scoutPatrolPoint(sim: ScoutNavHost, u: Unit): { x: number; y: nu
   };
 }
 
+/** Goal for scout flight: orbit engage target → recon patrol. */
+export function scoutNavGoal(
+  sim: ScoutNavHost,
+  u: Unit,
+): { x: number; y: number; mode: "harass" | "patrol" } {
+  const tgt = findScoutTarget(sim, u);
+  if (tgt) {
+    const ang = slotAngle(u.id + Math.floor(sim.t * 0.35), 10);
+    const orbit = Math.max(0.7, UNITS.scout.range * 0.78);
+    return {
+      x: ((tgt.x + Math.cos(ang) * orbit + MAP_W) % MAP_W + MAP_W) % MAP_W,
+      y: clamp(tgt.y + Math.sin(ang) * orbit * 0.75, 0.5, MAP_H - 0.5),
+      mode: "harass",
+    };
+  }
+
+  const g = scoutPatrolPoint(sim, u);
+  return { x: g.x, y: g.y, mode: "patrol" };
+}
+
 export function tickMovement(sim: MovementHost, dt: number) {
   const tasked = new Set<number>();
   if (sim.ops) {
@@ -73,11 +145,13 @@ export function tickMovement(sim: MovementHost, dt: number) {
     const speed = def.speed * raceUnitMul(sim.players[u.owner]!.race, u.kind).speed;
     let tx: number | null = null;
     let ty: number | null = null;
+    let scoutMode: "harass" | "patrol" | null = null;
 
     if (u.kind === "scout") {
-      const g = scoutPatrolPoint(sim, u);
+      const g = scoutNavGoal(sim, u);
       tx = g.x;
       ty = g.y;
+      scoutMode = g.mode;
     } else if (u.targetId != null) {
       if (u.targetIsBuilding) {
         const b = sim.buildings.find((x) => x.id === u.targetId);
@@ -114,9 +188,10 @@ export function tickMovement(sim: MovementHost, dt: number) {
     if (dx < -MAP_W / 2) dx += MAP_W;
     const dy = ty - u.y;
     const d = Math.hypot(dx, dy);
-    const stopAt = u.kind === "scout" ? 0.85 : u.targetId != null ? 0.35 : 0.4;
+    const stopAt =
+      u.kind === "scout" ? (scoutMode === "harass" ? 0.4 : 0.85) : u.targetId != null ? 0.35 : 0.4;
     if (d <= stopAt) {
-      if (u.kind === "scout") {
+      if (u.kind === "scout" && scoutMode === "patrol") {
         const drift = slotAngle(u.id + Math.floor(sim.t), 16);
         u.x = (u.x + Math.cos(drift) * speed * 0.35 * dt + MAP_W) % MAP_W;
         u.y = clamp(u.y + Math.sin(drift) * speed * 0.35 * dt, 0.5, MAP_H - 0.5);

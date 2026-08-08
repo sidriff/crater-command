@@ -42,6 +42,7 @@ import {
   SCOUT_PIVOT_Y,
   SCOUT_VENTRAL_Y,
 } from "./unitGeos";
+import { recordUnitPose, type UnitDeathPose } from "./entityDeaths";
 
 /** Roll-axis height for air units (model space). */
 function airPivotY(kind: UnitKind): number {
@@ -73,6 +74,8 @@ export type UnitsHost = PlumeHost & {
   dustGeo: THREE.BufferGeometry;
   dustMat: THREE.MeshBasicMaterial;
   dustRoot: THREE.Group;
+  /** Present on PlanetEntityLayer — death theater pose handoff. */
+  deathPoses?: Map<number, UnitDeathPose>;
   _tip: THREE.Vector3;
   _east: THREE.Vector3;
   _north: THREE.Vector3;
@@ -808,6 +811,35 @@ export function syncUnits(host: UnitsHost, snap: SimSnapshot, dt: number) {
           turret.localToWorld(host._tip);
           s.tipW = host._tip.clone();
         }
+      }
+
+      // Death theater handoff — last rendered pose wins when id vanishes next frame
+      if (host.deathPoses) {
+        const moveYaw = s.moveYaw;
+        const pose: UnitDeathPose = {
+          id: u.id,
+          kind: u.kind,
+          race,
+          owner: u.owner,
+          x: s.x,
+          y: s.y,
+          elev,
+          yaw: s.yaw,
+          bank,
+          pitch,
+          roll: s.roll,
+          sx,
+          sy,
+          sz,
+          throttle: s.throttle,
+          rcsL: s.rcsL,
+          rcsR: s.rcsR,
+          air,
+          vx: Math.cos(moveYaw) * s.speed,
+          vy: Math.sin(moveYaw) * s.speed,
+          speed: s.speed,
+        };
+        recordUnitPose(host as { deathPoses: Map<number, UnitDeathPose> }, pose);
       }
     }
 

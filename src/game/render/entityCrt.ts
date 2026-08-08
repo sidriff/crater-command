@@ -50,3 +50,20 @@ export function partPhase(
   return 2;
 }
 
+/**
+ * Reverse of partPhase for deaths: pass structural integrity 1→0.
+ * Same phase vocabulary (locked → resolving wire → gone).
+ */
+export function partPhaseUnbuild(
+  integrity: number,
+  partIndex: number,
+  n: number,
+  tSec: number,
+  seed: number,
+): 0 | 1 | 2 {
+  // Outer parts unlock first: reverse index through the same progress curve.
+  if (n <= 0) return integrity > 0.001 ? 2 : 0;
+  const revIndex = n - 1 - partIndex;
+  return partPhase(integrity, revIndex, n, tSec, seed + 17);
+}
+

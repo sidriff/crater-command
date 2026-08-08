@@ -1,6 +1,6 @@
-import { BUILDINGS, MAP_H, MAP_W, UNITS, raceUnitMul } from "./defs";
+import { BUILDINGS, MAP_H, MAP_W, UNITS, raceUnitMul, unitProducedBy } from "./defs";
 import type { CardId } from "./deck";
-import { scoutPatrolPoint } from "./movement";
+import { findScoutTarget } from "./movement";
 import type { GroundPath } from "./path";
 import type {
   Building,
@@ -142,83 +142,6 @@ function acquireTarget(
   return best;
 }
 
-/**
- * Scout path laser: only pick enemies sitting on the flight corridor ahead —
- * positive along-track distance within range, small cross-track offset.
- * Does not set chase goals; movement keeps patrolling regardless of targetId.
- */
-function acquireScoutPathTarget(
-  sim: CombatHost,
-  u: Unit,
-): { id: number; x: number; y: number; isBuilding: boolean } | null {
-  const def = UNITS.scout;
-  const goal = scoutPatrolPoint(sim, u);
-  let hx = goal.x - u.x;
-  if (hx > MAP_W / 2) hx -= MAP_W;
-  if (hx < -MAP_W / 2) hx += MAP_W;
-  let hy = goal.y - u.y;
-  let hLen = Math.hypot(hx, hy);
-  // Near a waypoint the patrol heading collapses — fall back to "toward enemy core"
-  // so the laser still has a forward while loitering.
-  if (hLen < 0.45) {
-    const enemyCore = sim.buildings.find((b) => b.owner !== u.owner && b.kind === "core");
-    if (enemyCore) {
-      hx = enemyCore.x - u.x;
-      if (hx > MAP_W / 2) hx -= MAP_W;
-      if (hx < -MAP_W / 2) hx += MAP_W;
-      hy = enemyCore.y - u.y;
-      hLen = Math.hypot(hx, hy);
-    }
-  }
-  if (hLen < 1e-4) {
-    hx = 1;
-    hy = 0;
-    hLen = 1;
-  }
-  hx /= hLen;
-  hy /= hLen;
-
-  const range = def.range;
-  /** Half-width of the fire corridor (map units). */
-  const halfW = 0.95;
-  let best: { id: number; x: number; y: number; isBuilding: boolean } | null = null;
-  let bestScore = 1e9;
-
-  const consider = (id: number, x: number, y: number, isBuilding: boolean, air: boolean) => {
-    if (air && !def.attackAir) return;
-    if (!air && !def.attackGround) return;
-    let ex = x - u.x;
-    if (ex > MAP_W / 2) ex -= MAP_W;
-    if (ex < -MAP_W / 2) ex += MAP_W;
-    const ey = y - u.y;
-    const d = Math.hypot(ex, ey);
-    if (d > range || d < 0.12) return;
-    const along = ex * hx + ey * hy;
-    // Must be ahead (small rear allowance for near-misses while banking)
-    if (along < -0.15) return;
-    const cross = Math.abs(ex * hy - ey * hx);
-    if (cross > halfW) return;
-    // Prefer near-centerline and closer
-    const score = d + cross * 1.4;
-    if (score < bestScore) {
-      bestScore = score;
-      best = { id, x, y, isBuilding };
-    }
-  };
-
-  for (const ou of sim.units) {
-    if (ou.owner === u.owner) continue;
-    consider(ou.id, ou.x, ou.y, false, UNITS[ou.kind].air);
-  }
-  if (def.attackGround) {
-    for (const b of sim.buildings) {
-      if (b.owner === u.owner) continue;
-      consider(b.id, b.x, b.y, true, false);
-    }
-  }
-  return best;
-}
-
 export function tickCombat(sim: CombatHost, dt: number) {
   for (const b of sim.buildings) {
     if (!b.done) continue;
@@ -274,18 +197,17 @@ export function tickCombat(sim: CombatHost, dt: number) {
     const def = UNITS[u.kind];
     u.attackTimer -= dt;
 
-    // Scout: light path laser only — engage corridor targets, never chase.
+    // Scout: units (incl. air that shoots back) + buildings; patrol when idle.
     if (u.kind === "scout") {
-      const tgt = acquireScoutPathTarget(sim, u);
+      const tgt = findScoutTarget(sim, u);
       if (!tgt) {
         u.targetId = null;
         u.targetIsBuilding = false;
         continue;
       }
-      // targetId is fire-lock only; movement always ignores it for scouts
       u.targetId = tgt.id;
       u.targetIsBuilding = tgt.isBuilding;
-      if (u.attackTimer > 0) continue;
+      if (dist(u.x, u.y, tgt.x, tgt.y) > def.range || u.attackTimer > 0) continue;
       const mul = raceUnitMul(sim.players[u.owner]!.race, u.kind).dmg;
       const toAir = tgt.isBuilding
         ? 0.4
@@ -419,6 +341,21 @@ export function tickProjectiles(sim: CombatHost, dt: number) {
         if (u.buildTargetId === b.id) {
           u.buildTargetId = null;
           u.carrying = false;
+        }
+      }
+      // Product still in the bay / on the rail dies with the structure —
+      // no separate unit death theater for a unit "contained" in the wreck.
+      const race = sim.players[b.owner]?.race ?? "operators";
+      const product = unitProducedBy(b.kind, race);
+      if (product) {
+        const r2 = 0.65 * 0.65;
+        for (const u of sim.units) {
+          if (u.owner !== b.owner || u.kind !== product || u.hp <= 0) continue;
+          let dx = u.x - b.x;
+          if (dx > MAP_W * 0.5) dx -= MAP_W;
+          if (dx < -MAP_W * 0.5) dx += MAP_W;
+          const dy = u.y - b.y;
+          if (dx * dx + dy * dy <= r2) u.hp = 0;
         }
       }
     }

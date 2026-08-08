@@ -365,7 +365,7 @@ export const UNITS: Record<UnitKind, UnitDef> = {
     speed: 0.59,
     vision: 7.5,
     air: true,
-    // Light path laser — harass only; combat does not divert patrol
+    // Light laser — harass units (incl. air) and peel buildings while on recon
     damage: 5,
     range: 2.35,
     attackAir: true,

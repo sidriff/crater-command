@@ -1,5 +1,5 @@
 /**
- * Flat-stage launch / egress poses for Dispatch lab.
+ * Flat-stage launch / egress poses for Construction lab (dispatch mode).
  *
  * Scout Works is the gold-standard path-follow grammar. Other producers use
  * draft stubs so scrub / loop / feedback work while real egress is authored.
@@ -553,7 +553,22 @@ export type DispatchLaunchId =
   | "barracks"
   | "airpad"
   | "bomber_works"
+  | "u:scout"
+  | "u:worker"
+  | "u:raider"
+  | "u:interceptor"
+  | "u:bomber"
   | string;
+
+/** Normalize catalog / legacy ids to launch family keys. */
+function normalizeLaunchId(id: DispatchLaunchId): string {
+  if (id === "u:scout" || id === "scout") return "scout_works";
+  if (id === "u:worker" || id === "worker" || id === "rover") return "depot";
+  if (id === "u:raider" || id === "raider" || id === "bay") return "barracks";
+  if (id === "u:interceptor" || id === "interceptor") return "airpad";
+  if (id === "u:bomber" || id === "bomber") return "bomber_works";
+  return id;
+}
 
 /** Pick the right pure-time egress for a catalog card. */
 export function evalDispatchLaunch(
@@ -561,7 +576,7 @@ export function evalDispatchLaunch(
   tSec: number,
   tuning: LaunchTuning,
 ): LaunchPose {
-  switch (id) {
+  switch (normalizeLaunchId(id)) {
     case "scout_works":
       return evalScoutLaunch(tSec, tuning);
     case "depot":
@@ -586,10 +601,8 @@ export function evalDispatchLaunch(
         heaviness: 1.35,
         speedScale: 0.75,
       });
-    default: {
-      // Unknown: park hold if we know the building, else scout park
+    default:
       return evalScoutLaunch(0, tuning);
-    }
   }
 }
 
@@ -606,15 +619,15 @@ export function launchWindowSecFor(
   id: DispatchLaunchId,
   t: LaunchTuning,
 ): number {
-  const base = launchWindowSec(t);
-  if (id === "bomber_works") {
+  const key = normalizeLaunchId(id);
+  if (key === "bomber_works") {
     const heavy = 1.35;
     return (
       Math.max(0.05, t.railSec) * heavy +
       Math.max(0.05, t.climbSec) * (0.85 + 0.15 * heavy)
     );
   }
-  return base;
+  return launchWindowSec(t);
 }
 
 /** Hold at park (legacy / fallback). */
